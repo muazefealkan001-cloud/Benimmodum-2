@@ -19,8 +19,8 @@
 			"com.example.ExampleMod"
 		],
 		"client": [
-			""client": ["com.fpsboost.FpsBoostClient"]"
-		]
+    "com.fpsboost.FpsBoostClient"
+]
 	},
 	"mixins": [
 		"modid.mixins.json",
