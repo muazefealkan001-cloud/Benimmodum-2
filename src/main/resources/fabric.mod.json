@@ -1,6 +1,6 @@
 {
 	"schemaVersion": 1,
-	"id": "modid",
+	"id": "fpsboost",
 	"version": "${version}",
 	"name": "Example Mod",
 	"description": "This is an example description! Tell everyone what your mod is about!",
@@ -19,7 +19,7 @@
 			"com.example.ExampleMod"
 		],
 		"client": [
-			"com.example.client.ExampleModClient"
+			""client": ["com.fpsboost.FpsBoostClient"]"
 		]
 	},
 	"mixins": [
