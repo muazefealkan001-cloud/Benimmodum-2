@@ -18,7 +18,7 @@ public class StretchClient implements ClientModInitializer {
     public void onInitializeClient() {
         KeyMapping.Category cat = KeyMapping.Category.register(
             Identifier.fromNamespaceAndPath("stretchres", "main"));
-        toggleKey = KeyMappingHelper.registerKeyMapping(
+toggleKey = KeyBindingHelper.registerKeyBinding(
             new KeyMapping("key.stretchres.toggle", GLFW.GLFW_KEY_LEFT_SHIFT, cat));
 
         ClientTickEvents.END_CLIENT_TICK.register(mc -> {
