@@ -18,9 +18,11 @@
 		"main": [
 			"com.example.ExampleMod"
 		],
-		"client": [
-    "com.fpsboost.FpsBoostClient"
-]
+"client": [
+    "com.fpsboost.FpsBoostClient",
+    "com.stretchres.StretchClient"
+]    
+
 	},
 	"mixins": [
 		"modid.mixins.json",
