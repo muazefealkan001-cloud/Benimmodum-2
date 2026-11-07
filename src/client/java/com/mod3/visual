@@ -1,17 +1,18 @@
-package com.nexus;
+package com.mod3;
 
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
-import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
-
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.util.InputUtil;
-import net.minecraft.text.Text;
-
+import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
+import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.phys.HitResult;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayDeque;
@@ -19,381 +20,174 @@ import java.util.Deque;
 
 public class Nexus implements ClientModInitializer {
 
-    private static KeyBinding menuKey;
+    private static KeyMapping menuKey;
 
-    private static boolean hud = true;
-    private static boolean fps = true;
-    private static boolean cps = true;
-    private static boolean hitCounter = true;
-    private static boolean hitTimer = true;
-    private static boolean comboCounter = true;
-    private static boolean attackStats = true;
-    private static boolean coordinates = true;
-    private static boolean armor = true;
-    private static boolean sprint = false;
-    private static boolean aimTrainer = false;
+    private static final boolean[] on = {
+        true,  // 0 Hit Counter
+        true,  // 1 Hit Timer
+        true,  // 2 Combo Counter
+        true,  // 3 Attack Stats
+        true,  // 4 CPS
+        false, // 5 Aim Trainer (henuz bir isi yok)
+        true,  // 6 HUD basligi
+        true,  // 7 FPS
+        true,  // 8 Koordinat
+        true,  // 9 Armor
+        false  // 10 Sprint
+    };
+
+    private static final String[] NAMES = {
+        "Hit Counter", "Hit Timer", "Combo Counter", "Attack Stats", "CPS",
+        "Aim Trainer", "HUD", "FPS", "Coordinates", "Armor HUD", "Sprint"
+    };
+
+    private static final String[] CATS = {"Combat", "Render", "Movement", "Utility"};
 
     private static int hits = 0;
     private static int combo = 0;
-
     private static long lastHit = 0;
-
-    private static final Deque<Long> clicks =
-        new ArrayDeque<>();
+    private static boolean wasDown = false;
+    private static final Deque<Long> clicks = new ArrayDeque<>();
 
     @Override
     public void onInitializeClient() {
-
+        KeyMapping.Category cat = KeyMapping.Category.register(
+            Identifier.fromNamespaceAndPath("nexus", "main"));
         menuKey = KeyBindingHelper.registerKeyBinding(
-            new KeyBinding(
-                "key.nexus.menu",
-                InputUtil.Type.KEYSYM,
-                GLFW.GLFW_KEY_RIGHT_SHIFT,
-                KeyBinding.Category.MISC
-            )
-        );
+            new KeyMapping("key.nexus.menu", GLFW.GLFW_KEY_RIGHT_SHIFT, cat));
 
-        ClientTickEvents.END_CLIENT_TICK.register(client -> {
-
-            while (menuKey.wasPressed()) {
-                client.setScreen(new NexusGUI());
+        ClientTickEvents.END_CLIENT_TICK.register(mc -> {
+            while (menuKey.consumeClick()) {
+                mc.setScreen(new NexusGUI());
             }
+            if (mc.player == null) return;
 
-            if (client.player != null && sprint) {
-                client.player.setSprinting(true);
+            if (on[10]) mc.player.setSprinting(true);
+
+            boolean down = mc.options.keyAttack.isDown();
+            if (down && !wasDown && mc.screen == null) {
+                registerClick();
+                if (mc.hitResult != null
+                        && mc.hitResult.getType() == HitResult.Type.ENTITY) {
+                    registerHit();
+                }
             }
+            wasDown = down;
+
+            if (mc.player.hurtTime > 0) combo = 0;
         });
 
-        HudRenderCallback.EVENT.register(
-            (context, tickCounter) -> renderHUD(context)
+        HudElementRegistry.attachElementAfter(
+            VanillaHudElements.MISC_OVERLAYS,
+            Identifier.fromNamespaceAndPath("nexus", "hud"),
+            (graphics, tickCounter) -> renderHud(graphics)
         );
-
-        System.out.println("[NEXUS] VERSION 1.3 LOADED");
     }
 
-    public static void registerClick() {
+    private static void registerClick() {
         long now = System.currentTimeMillis();
-
         clicks.addLast(now);
-
-        while (!clicks.isEmpty()
-                && now - clicks.peekFirst() > 1000) {
-            clicks.removeFirst();
-        }
+        trimClicks(now);
     }
 
-    public static void registerHit() {
+    private static void registerHit() {
         hits++;
         combo++;
         lastHit = System.currentTimeMillis();
     }
 
-    public static void resetCombo() {
-        combo = 0;
-    }
-
-    private static int getCPS() {
-        long now = System.currentTimeMillis();
-
-        while (!clicks.isEmpty()
-                && now - clicks.peekFirst() > 1000) {
+    private static void trimClicks(long now) {
+        while (!clicks.isEmpty() && now - clicks.peekFirst() > 1000) {
             clicks.removeFirst();
         }
+    }
 
+    private static int getCps() {
+        trimClicks(System.currentTimeMillis());
         return clicks.size();
     }
 
-    private static void renderHUD(DrawContext ctx) {
-
-        MinecraftClient mc = MinecraftClient.getInstance();
-
-        if (mc.player == null || mc.options.hudHidden) {
-            return;
-        }
-
-        int y = 10;
-
-        if (hud) {
-            text(ctx, "NEXUS 1.3", 10, y, 0xFFB56CFF);
-            y += 13;
-        }
-
-        if (fps) {
-            text(ctx, "FPS: " + mc.getCurrentFps(), 10, y, -1);
-            y += 13;
-        }
-
-        if (cps) {
-            text(ctx, "CPS: " + getCPS(), 10, y, -1);
-            y += 13;
-        }
-
-        if (hitCounter) {
-            text(ctx, "HITS: " + hits, 10, y, -1);
-            y += 13;
-        }
-
-        if (comboCounter) {
-            text(ctx, "COMBO: " + combo, 10, y, 0xFFB56CFF);
-            y += 13;
-        }
-
-        if (hitTimer) {
-            String timer = lastHit == 0
-                ? "--"
-                : ((System.currentTimeMillis() - lastHit) / 1000)
-                    + "s";
-
-            text(ctx, "LAST HIT: " + timer, 10, y, -1);
-            y += 13;
-        }
-
-        if (attackStats) {
-            text(ctx, "ATTACK STATS: " + hits,
-                10, y, 0xFFB56CFF);
-            y += 13;
-        }
-
-        if (coordinates) {
-            text(ctx, String.format(
-                "XYZ: %.1f %.1f %.1f",
-                mc.player.getX(),
-                mc.player.getY(),
-                mc.player.getZ()
-            ), 10, y, -1);
-
-            y += 13;
-        }
-
-        if (armor) {
-            text(ctx, "ARMOR: " + mc.player.getArmor(),
-                10, y, -1);
-        }
+    private static void line(GuiGraphics g, String s, int y, int color) {
+        g.drawString(Minecraft.getInstance().font, s, 10, y, color, true);
     }
 
-    private static void text(
-        DrawContext ctx,
-        String value,
-        int x,
-        int y,
-        int color
-    ) {
-        MinecraftClient mc = MinecraftClient.getInstance();
+    private static void renderHud(GuiGraphics g) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.options.hideGui) return;
 
-        ctx.drawText(
-            mc.textRenderer,
-            value,
-            x,
-            y,
-            color,
-            true
-        );
+        int y = 10;
+        if (on[6]) { line(g, "NEXUS 1.3", y, 0xFFB56CFF); y += 13; }
+        if (on[7]) { line(g, "FPS: " + mc.getFps(), y, 0xFFFFFFFF); y += 13; }
+        if (on[4]) { line(g, "CPS: " + getCps(), y, 0xFFFFFFFF); y += 13; }
+        if (on[0]) { line(g, "HITS: " + hits, y, 0xFFFFFFFF); y += 13; }
+        if (on[2]) { line(g, "COMBO: " + combo, y, 0xFFB56CFF); y += 13; }
+        if (on[1]) {
+            String t = lastHit == 0 ? "--"
+                : ((System.currentTimeMillis() - lastHit) / 1000) + "s";
+            line(g, "LAST HIT: " + t, y, 0xFFFFFFFF); y += 13;
+        }
+        if (on[3]) { line(g, "ATTACK STATS: " + hits, y, 0xFFB56CFF); y += 13; }
+        if (on[8]) {
+            line(g, String.format("XYZ: %.1f %.1f %.1f",
+                mc.player.getX(), mc.player.getY(), mc.player.getZ()),
+                y, 0xFFFFFFFF);
+            y += 13;
+        }
+        if (on[9]) {
+            line(g, "ARMOR: " + mc.player.getArmorValue(), y, 0xFFFFFFFF);
+        }
     }
 
     public static class NexusGUI extends Screen {
 
-        private String category = "Combat";
-
-        private final String[] categories = {
-            "Combat",
-            "Render",
-            "Movement",
-            "Utility"
-        };
-
-        private final String[] names = {
-            "Hit Counter",
-            "Hit Timer",
-            "Combo Counter",
-            "Attack Stats",
-            "CPS",
-            "Aim Trainer",
-            "HUD",
-            "FPS",
-            "Coordinates",
-            "Armor HUD",
-            "Sprint"
-        };
+        private int category = 0;
 
         public NexusGUI() {
-            super(Text.literal("NEXUS CLIENT"));
-        }
-
-        private boolean enabled(int i) {
-            return switch (i) {
-                case 0 -> hitCounter;
-                case 1 -> hitTimer;
-                case 2 -> comboCounter;
-                case 3 -> attackStats;
-                case 4 -> cps;
-                case 5 -> aimTrainer;
-                case 6 -> hud;
-                case 7 -> fps;
-                case 8 -> coordinates;
-                case 9 -> armor;
-                case 10 -> sprint;
-                default -> false;
-            };
-        }
-
-        private void toggle(int i) {
-            switch (i) {
-                case 0 -> hitCounter = !hitCounter;
-                case 1 -> hitTimer = !hitTimer;
-                case 2 -> comboCounter = !comboCounter;
-                case 3 -> attackStats = !attackStats;
-                case 4 -> cps = !cps;
-                case 5 -> aimTrainer = !aimTrainer;
-                case 6 -> hud = !hud;
-                case 7 -> fps = !fps;
-                case 8 -> coordinates = !coordinates;
-                case 9 -> armor = !armor;
-                case 10 -> sprint = !sprint;
-            }
+            super(Component.literal("NEXUS CLIENT"));
         }
 
         private boolean belongs(int i) {
             return switch (category) {
-                case "Combat" -> i <= 5;
-                case "Render" -> i >= 6 && i <= 7;
-                case "Utility" -> i >= 8 && i <= 9;
-                case "Movement" -> i == 10;
+                case 0 -> i <= 5;
+                case 1 -> i == 6 || i == 7;
+                case 2 -> i == 10;
+                case 3 -> i == 8 || i == 9;
                 default -> false;
             };
         }
 
         @Override
-        public void render(
-            DrawContext ctx,
-            int mouseX,
-            int mouseY,
-            float delta
-        ) {
-
+        protected void init() {
             int x = width / 2 - 160;
-            int y = height / 2 - 140;
+            int y = height / 2 - 110;
 
-            ctx.fill(0, 0, width, height, 0x99000000);
-            ctx.fill(x, y, x + 320, y + 280, 0xF010101A);
-            ctx.fill(x, y, x + 320, y + 38, 0xFF7029B5);
-
-            ctx.drawCenteredTextWithShadow(
-                textRenderer,
-                "NEXUS CLIENT 1.3",
-                width / 2,
-                y + 13,
-                -1
-            );
-
-            for (int i = 0; i < categories.length; i++) {
-
-                int bx = x + 8 + i * 78;
-
-                ctx.fill(
-                    bx, y + 48,
-                    bx + 74, y + 74,
-                    category.equals(categories[i])
-                        ? 0xFF963FFF
-                        : 0xFF292933
-                );
-
-                ctx.drawCenteredTextWithShadow(
-                    textRenderer,
-                    categories[i],
-                    bx + 37,
-                    y + 57,
-                    -1
-                );
+            for (int c = 0; c < CATS.length; c++) {
+                final int idx = c;
+                String label = (c == category ? "> " : "") + CATS[c];
+                addRenderableWidget(Button.builder(Component.literal(label), b -> {
+                    category = idx;
+                    rebuildWidgets();
+                }).bounds(x + c * 80, y, 76, 20).build());
             }
 
             int row = 0;
-
-            for (int i = 0; i < names.length; i++) {
-
+            for (int i = 0; i < NAMES.length; i++) {
                 if (!belongs(i)) continue;
-
-                int rowY = y + 85 + row * 28;
-
-                ctx.fill(
-                    x + 10, rowY,
-                    x + 310, rowY + 23,
-                    enabled(i) ? 0xFF7135AD : 0xFF252530
-                );
-
-                ctx.drawText(
-                    textRenderer,
-                    names[i],
-                    x + 20,
-                    rowY + 7,
-                    -1,
-                    false
-                );
-
-                ctx.drawText(
-                    textRenderer,
-                    enabled(i) ? "ON" : "OFF",
-                    x + 275,
-                    rowY + 7,
-                    -1,
-                    false
-                );
-
+                final int idx = i;
+                String label = NAMES[i] + ": " + (on[i] ? "ON" : "OFF");
+                addRenderableWidget(Button.builder(Component.literal(label), b -> {
+                    on[idx] = !on[idx];
+                    rebuildWidgets();
+                }).bounds(x + 10, y + 35 + row * 26, 300, 20).build());
                 row++;
             }
-
-            super.render(ctx, mouseX, mouseY, delta);
         }
 
         @Override
-        public boolean mouseClicked(
-            double mouseX,
-            double mouseY,
-            int button
-        ) {
-
-            if (button != 0) {
-                return super.mouseClicked(mouseX, mouseY, button);
-            }
-
-            int x = width / 2 - 160;
-            int y = height / 2 - 140;
-
-            for (int i = 0; i < categories.length; i++) {
-
-                int bx = x + 8 + i * 78;
-
-                if (mouseX >= bx && mouseX <= bx + 74
-                    && mouseY >= y + 48 && mouseY <= y + 74) {
-
-                    category = categories[i];
-                    return true;
-                }
-            }
-
-            int row = 0;
-
-            for (int i = 0; i < names.length; i++) {
-
-                if (!belongs(i)) continue;
-
-                int rowY = y + 85 + row * 28;
-
-                if (mouseX >= x + 10 && mouseX <= x + 310
-                    && mouseY >= rowY && mouseY <= rowY + 23) {
-
-                    toggle(i);
-                    return true;
-                }
-
-                row++;
-            }
-
-            return super.mouseClicked(mouseX, mouseY, button);
-        }
-
-        @Override
-        public boolean shouldPause() {
-            return false;
+        public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
+            super.render(g, mouseX, mouseY, delta);
+            g.drawString(font, "NEXUS CLIENT 1.3",
+                width / 2 - 50, height / 2 - 135, 0xFFB56CFF, true);
         }
     }
 }
