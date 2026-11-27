@@ -18,9 +18,7 @@
 		"main": [
 			"com.example.ExampleMod"
 		],
-"client": [
-    "com.mod3.Nexus"
-]
+		"client": []
 	},
 	"mixins": [
 		"modid.mixins.json",
