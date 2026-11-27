@@ -3,7 +3,8 @@ package com.nexus;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
-import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
+import net.fabricmc.fabric.api.client.rendering.v1.HudLayerRegistrationCallback;
+import net.fabricmc.fabric.api.client.rendering.v1.IdentifiedLayer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.Click;
@@ -14,6 +15,7 @@ import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.render.RenderTickCounter;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
@@ -21,6 +23,7 @@ import net.minecraft.item.Items;
 import net.minecraft.particle.ParticleTypes;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
@@ -33,6 +36,10 @@ import java.util.Comparator;
 import java.util.Deque;
 import java.util.Iterator;
 import java.util.List;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
+import java.util.function.DoubleConsumer;
+import java.util.function.DoubleSupplier;
 
 public class NexusMod implements ClientModInitializer {
 
@@ -70,7 +77,7 @@ public class NexusMod implements ClientModInitializer {
     public static boolean showArmorHud = true;
     public static boolean showKeystrokesHud = true;
 
-    // HUD Kutularının Ekran Koordinatları (Menüde Sürüklenebilir)
+    // HUD Kutularının Ekran Koordinatları
     public static int statsHudX = 10;
     public static int statsHudY = 10;
     public static int targetHudX = 10;
@@ -86,14 +93,16 @@ public class NexusMod implements ClientModInitializer {
     private static LivingEntity lastAttackedTarget = null;
     private static long lastAttackTimeMs = 0L;
     private static boolean wasOnGround = true;
+    private static boolean prevAttackPressed = false;
+    private static boolean prevUsePressed = false;
 
     private static final Deque<Long> leftClicksMs = new ArrayDeque<>();
     private static final Deque<Long> rightClicksMs = new ArrayDeque<>();
     private static final List<JumpRing> activeRings = new ArrayList<>();
 
     private record JumpRing(Vec3d pos, float radius, int maxAge, int age) {
-        JumpRing advance() {
-            return new JumpRing(pos, radius + (effectIntensity * 0.004f), maxAge, age + 1);
+        JumpRing advance(int intensity) {
+            return new JumpRing(pos, radius + (intensity * 0.004f), maxAge, age + 1);
         }
     }
 
@@ -121,7 +130,10 @@ public class NexusMod implements ClientModInitializer {
         ));
 
         ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
-        HudRenderCallback.EVENT.register(this::onHudRender);
+
+        HudLayerRegistrationCallback.EVENT.register(drawer -> drawer.addLayer(
+                IdentifiedLayer.of(Identifier.of(MOD_ID, "hud_overlay"), this::onHudRender)
+        ));
     }
 
     private void onClientTick(MinecraftClient client) {
@@ -144,14 +156,19 @@ public class NexusMod implements ClientModInitializer {
             return;
         }
 
-        // Sol ve sağ tık CPS takibi
+        // Sol ve sağ tık basım anlarını kaydet
         long now = System.currentTimeMillis();
-        if (client.options.attackKey.isPressed() && (leftClicksMs.isEmpty() || now - leftClicksMs.peekLast() > 90L)) {
+        boolean attackDown = client.options.attackKey.isPressed();
+        boolean useDown = client.options.useKey.isPressed();
+
+        if (attackDown && !prevAttackPressed) {
             leftClicksMs.addLast(now);
         }
-        if (client.options.useKey.isPressed() && (rightClicksMs.isEmpty() || now - rightClicksMs.peekLast() > 90L)) {
+        if (useDown && !prevUsePressed) {
             rightClicksMs.addLast(now);
         }
+        prevAttackPressed = attackDown;
+        prevUsePressed = useDown;
 
         // Elytra uçuş kontrolü
         if (elytraControlEnabled && player.isGliding()) {
@@ -170,10 +187,10 @@ public class NexusMod implements ClientModInitializer {
             lockedTarget = null;
         }
 
-        // Vuruş parçacıkları ve zıplama halkası (Soup Visual)
+        // Soup Visual efektleri
         if (soupVisualsEnabled) {
             Entity attacked = client.targetedEntity;
-            if (attacked instanceof LivingEntity living && client.options.attackKey.isPressed()) {
+            if (attacked instanceof LivingEntity living && attackDown) {
                 lastAttackedTarget = living;
                 lastAttackTimeMs = now;
                 if (hitParticlesEnabled) {
@@ -182,8 +199,12 @@ public class NexusMod implements ClientModInitializer {
             }
 
             if (jumpRingsEnabled && wasOnGround && !player.isOnGround() && player.getVelocity().y > 0.1) {
-                activeRings.add(new JumpRing(new Vec3d(player.getX(), player.getY() + 0.05, player.getZ()),
-                        ringRadius, 18, 0));
+                activeRings.add(new JumpRing(
+                        new Vec3d(player.getX(), player.getY() + 0.05, player.getZ()),
+                        ringRadius,
+                        18,
+                        0
+                ));
             }
             wasOnGround = player.isOnGround();
 
@@ -202,7 +223,7 @@ public class NexusMod implements ClientModInitializer {
     private void applyElytraControl(ClientPlayerEntity player) {
         Vec3d currentVel = player.getVelocity();
         double currentSpeed = currentVel.length();
-        if (currentSpeed < 0.05) {
+        if (currentSpeed < 0.05 || Double.isNaN(currentSpeed)) {
             return;
         }
 
@@ -210,10 +231,11 @@ public class NexusMod implements ClientModInitializer {
         double targetSpeed = Math.min(currentSpeed, maxFlightSpeed);
         Vec3d desiredVel = lookDir.multiply(targetSpeed);
 
+        double alpha = MathHelper.clamp(steerResponsiveness, 0.01, 0.50);
         player.setVelocity(new Vec3d(
-                currentVel.x + (desiredVel.x - currentVel.x) * steerResponsiveness,
-                currentVel.y + (desiredVel.y - currentVel.y) * steerResponsiveness,
-                currentVel.z + (desiredVel.z - currentVel.z) * steerResponsiveness
+                currentVel.x + (desiredVel.x - currentVel.x) * alpha,
+                currentVel.y + (desiredVel.y - currentVel.y) * alpha,
+                currentVel.z + (desiredVel.z - currentVel.z) * alpha
         ));
     }
 
@@ -302,7 +324,7 @@ public class NexusMod implements ClientModInitializer {
                 double pz = ring.pos().z + Math.sin(theta) * ring.radius();
                 client.world.addParticleClient(ParticleTypes.GLOW, px, ring.pos().y, pz, 0.0, 0.0, 0.0);
             }
-            nextRings.add(ring.advance());
+            nextRings.add(ring.advance(effectIntensity));
         }
         activeRings.clear();
         activeRings.addAll(nextRings);
@@ -321,7 +343,7 @@ public class NexusMod implements ClientModInitializer {
             return;
         }
 
-        // 1. AxolotlClient tarzı Telemetri HUD (FPS, CPS, Ping, Speed)
+        // 1. AxolotlClient tarzı Telemetri HUD
         List<String> lines = new ArrayList<>();
         if (showFpsHud) {
             lines.add("FPS: " + mc.getCurrentFps());
@@ -342,7 +364,7 @@ public class NexusMod implements ClientModInitializer {
         }
 
         if (!lines.isEmpty()) {
-            int boxW = 112;
+            int boxW = 116;
             int boxH = 8 + lines.size() * 11;
             ctx.fill(statsHudX, statsHudY, statsHudX + boxW, statsHudY + boxH, 0x990D1424);
             drawRectBorder(ctx, statsHudX, statsHudY, boxW, boxH, previewMode ? 0xFF38BDF8 : 0xFF233554);
@@ -361,7 +383,7 @@ public class NexusMod implements ClientModInitializer {
         }
 
         if (targetHudEnabled && target != null) {
-            int tw = 142;
+            int tw = 144;
             int th = 42;
             ctx.fill(targetHudX, targetHudY, targetHudX + tw, targetHudY + th, 0xA8111827);
             drawRectBorder(ctx, targetHudX, targetHudY, tw, th, previewMode ? 0xFF38BDF8 : 0xFFEF4444);
@@ -383,28 +405,28 @@ public class NexusMod implements ClientModInitializer {
             ctx.fill(barX, barY, barX + Math.round(barW * ratio), barY + barH, 0xFF22C55E);
         }
 
-        // 3. AxolotlClient tarzı Armor HUD
+        // 3. AxolotlClient tarzı Armor HUD (1.21.11 EquipmentSlot uyumlu)
         if (showArmorHud) {
-            int aw = 96;
-            int ah = 24;
+            int aw = 104;
+            int ah = 26;
             ctx.fill(armorHudX, armorHudY, armorHudX + aw, armorHudY + ah, 0x990D1424);
             drawRectBorder(ctx, armorHudX, armorHudY, aw, ah, previewMode ? 0xFF38BDF8 : 0xFF233554);
 
-            ItemStack[] pieces = {
-                    mc.player.getInventory().getStack(39),
-                    mc.player.getInventory().getStack(38),
-                    mc.player.getInventory().getStack(37),
-                    mc.player.getInventory().getStack(36)
+            EquipmentSlot[] slots = {
+                    EquipmentSlot.HEAD,
+                    EquipmentSlot.CHEST,
+                    EquipmentSlot.LEGS,
+                    EquipmentSlot.FEET
             };
-            for (int i = 0; i < 4; i++) {
-                ItemStack st = pieces[i];
-                int ix = armorHudX + 5 + i * 22;
+            for (int i = 0; i < slots.length; i++) {
+                ItemStack st = mc.player.getEquippedStack(slots[i]);
+                int ix = armorHudX + 5 + i * 24;
                 int iy = armorHudY + 4;
-                if (!st.isEmpty()) {
+                if (st != null && !st.isEmpty()) {
                     ctx.drawItem(st, ix, iy);
-                    if (st.isDamageable()) {
+                    if (st.isDamageable() && st.getMaxDamage() > 0) {
                         int pct = Math.round(((st.getMaxDamage() - st.getDamage()) / (float) st.getMaxDamage()) * 100f);
-                        ctx.drawText(tr, pct + "%", ix, iy + 14, pct > 25 ? 0xFF94A3B8 : 0xFFEF4444, false);
+                        ctx.drawText(tr, pct + "%", ix, iy + 15, pct > 25 ? 0xFF94A3B8 : 0xFFEF4444, false);
                     }
                 }
             }
@@ -456,7 +478,7 @@ public class NexusMod implements ClientModInitializer {
         private static final int COLOR_TEXT = 0xFFF8FAFC;
         private static final int COLOR_MUTED = 0xFF94A3B8;
 
-        private int selectedCategory = 0; // 0: Elytra PvP, 1: Soup Visual, 2: Axolotl HUD, 3: Düzenleme
+        private int selectedCategory = 0;
         private final List<ControlRow> rows = new ArrayList<>();
         private String activeSliderId = null;
         private String draggingHudId = null;
@@ -479,8 +501,8 @@ public class NexusMod implements ClientModInitializer {
                         () -> elytraControlEnabled, v -> elytraControlEnabled = v));
                 rows.add(new SliderRow("steer", "Dönüş Hassasiyeti", "Yüksek değer daha keskin dönüş sağlar",
                         0.01, 0.25, () -> steerResponsiveness, v -> steerResponsiveness = v, "%.3f"));
-                rows.add(new SliderRow("rocket", "Otomatik Havai Fişek", "Hız düştüğünde hotbard'daki fişeği kullanır",
-                        0.0, 1.0, () -> autoRocketEnabled ? 1.0 : 0.0, v -> autoRocketEnabled = v >= 0.5, "%.0f"));
+                rows.add(new ToggleRow("rocket", "Otomatik Havai Fişek", "Hız düştüğünde hotbard'daki fişeği kullanır",
+                        () -> autoRocketEnabled, v -> autoRocketEnabled = v));
                 rows.add(new SliderRow("max_spd", "Maksimum Uçuş Hızı", "Süzülme hız tavanı",
                         0.80, 4.50, () -> maxFlightSpeed, v -> maxFlightSpeed = v, "%.2f"));
             } else if (selectedCategory == 1) {
@@ -527,7 +549,6 @@ public class NexusMod implements ClientModInitializer {
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
             context.fill(0, 0, this.width, this.height, COLOR_BACKDROP);
 
-            // HUD panellerini canlı önizleme olarak çiz (sürüklenebilir)
             if (hudMasterEnabled && this.client != null) {
                 renderAllHudModules(context, this.textRenderer, this.client, true);
             }
@@ -638,20 +659,19 @@ public class NexusMod implements ClientModInitializer {
                     return true;
                 }
 
-                // Ana pencere dışındaki HUD kutularını sürükleme
-                if (mouseX >= statsHudX && mouseX <= statsHudX + 112 && mouseY >= statsHudY && mouseY <= statsHudY + 56) {
+                if (mouseX >= statsHudX && mouseX <= statsHudX + 116 && mouseY >= statsHudY && mouseY <= statsHudY + 56) {
                     draggingHudId = "stats";
                     dragOffsetX = (int) mouseX - statsHudX;
                     dragOffsetY = (int) mouseY - statsHudY;
                     return true;
                 }
-                if (mouseX >= targetHudX && mouseX <= targetHudX + 142 && mouseY >= targetHudY && mouseY <= targetHudY + 42) {
+                if (mouseX >= targetHudX && mouseX <= targetHudX + 144 && mouseY >= targetHudY && mouseY <= targetHudY + 42) {
                     draggingHudId = "target";
                     dragOffsetX = (int) mouseX - targetHudX;
                     dragOffsetY = (int) mouseY - targetHudY;
                     return true;
                 }
-                if (mouseX >= armorHudX && mouseX <= armorHudX + 96 && mouseY >= armorHudY && mouseY <= armorHudY + 24) {
+                if (mouseX >= armorHudX && mouseX <= armorHudX + 104 && mouseY >= armorHudY && mouseY <= armorHudY + 26) {
                     draggingHudId = "armor";
                     dragOffsetX = (int) mouseX - armorHudX;
                     dragOffsetY = (int) mouseY - armorHudY;
@@ -745,12 +765,10 @@ public class NexusMod implements ClientModInitializer {
             private final String id;
             private final String title;
             private final String desc;
-            private final java.util.function.BooleanSupplier getter;
-            private final java.util.function.Consumer<Boolean> setter;
+            private final BooleanSupplier getter;
+            private final Consumer<Boolean> setter;
 
-            ToggleRow(String id, String title, String desc,
-                      java.util.function.BooleanSupplier getter,
-                      java.util.function.Consumer<Boolean> setter) {
+            ToggleRow(String id, String title, String desc, BooleanSupplier getter, Consumer<Boolean> setter) {
                 this.id = id;
                 this.title = title;
                 this.desc = desc;
@@ -801,14 +819,12 @@ public class NexusMod implements ClientModInitializer {
             private final String desc;
             private final double min;
             private final double max;
-            private final java.util.function.DoubleSupplier getter;
-            private final java.util.function.DoubleConsumer setter;
+            private final DoubleSupplier getter;
+            private final DoubleConsumer setter;
             private final String format;
 
             SliderRow(String id, String title, String desc, double min, double max,
-                      java.util.function.DoubleSupplier getter,
-                      java.util.function.DoubleConsumer setter,
-                      String format) {
+                      DoubleSupplier getter, DoubleConsumer setter, String format) {
                 this.id = id;
                 this.title = title;
                 this.desc = desc;
