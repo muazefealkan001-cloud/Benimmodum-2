@@ -1,14 +1,9 @@
 {
 	"required": true,
-	"package": "com.stretchres.mixin",
+	"package": "com.example.client.mixin",
 	"compatibilityLevel": "JAVA_21",
-	"client": [
-		"GameRendererMixin"
-	],
+	"client": [],
 	"injectors": {
 		"defaultRequire": 1
-	},
-	"overwrites": {
-		"requireAnnotations": true
 	}
 }
