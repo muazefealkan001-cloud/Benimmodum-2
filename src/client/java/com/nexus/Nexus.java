@@ -527,3 +527,4 @@ public class NexusMod implements ClientModInitializer {
         }
     }
 }
+
