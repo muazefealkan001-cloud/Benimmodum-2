@@ -3,8 +3,7 @@ package com.nexus;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
-import net.fabricmc.fabric.api.client.rendering.v1.HudLayerRegistrationCallback;
-import net.fabricmc.fabric.api.client.rendering.v1.IdentifiedLayer;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.Click;
@@ -131,9 +130,10 @@ public class NexusMod implements ClientModInitializer {
 
         ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
 
-        HudLayerRegistrationCallback.EVENT.register(drawer -> drawer.addLayer(
-                IdentifiedLayer.of(Identifier.of(MOD_ID, "hud_overlay"), this::onHudRender)
-        ));
+        HudElementRegistry.addLast(
+                Identifier.of(MOD_ID, "hud_overlay"),
+                this::onHudRender
+        );
     }
 
     private void onClientTick(MinecraftClient client) {
@@ -156,7 +156,6 @@ public class NexusMod implements ClientModInitializer {
             return;
         }
 
-        // Sol ve sağ tık basım anlarını kaydet
         long now = System.currentTimeMillis();
         boolean attackDown = client.options.attackKey.isPressed();
         boolean useDown = client.options.useKey.isPressed();
@@ -170,24 +169,20 @@ public class NexusMod implements ClientModInitializer {
         prevAttackPressed = attackDown;
         prevUsePressed = useDown;
 
-        // Elytra uçuş kontrolü
         if (elytraControlEnabled && player.isGliding()) {
             applyElytraControl(player);
         }
 
-        // Otomatik fişek
         if (autoRocketEnabled && player.isGliding() && rocketCooldown == 0 && client.interactionManager != null) {
             tryAutoRocket(client, player);
         }
 
-        // Hedef seçici
         if (targetAssistEnabled) {
             updateLockedTarget(client, player);
         } else {
             lockedTarget = null;
         }
 
-        // Soup Visual efektleri
         if (soupVisualsEnabled) {
             Entity attacked = client.targetedEntity;
             if (attacked instanceof LivingEntity living && attackDown) {
@@ -343,7 +338,6 @@ public class NexusMod implements ClientModInitializer {
             return;
         }
 
-        // 1. AxolotlClient tarzı Telemetri HUD
         List<String> lines = new ArrayList<>();
         if (showFpsHud) {
             lines.add("FPS: " + mc.getCurrentFps());
@@ -373,7 +367,6 @@ public class NexusMod implements ClientModInitializer {
             }
         }
 
-        // 2. Soup Visual tarzı Target HUD
         LivingEntity target = lockedTarget;
         if (target == null && System.currentTimeMillis() - lastAttackTimeMs < 3500L) {
             target = lastAttackedTarget;
@@ -405,7 +398,6 @@ public class NexusMod implements ClientModInitializer {
             ctx.fill(barX, barY, barX + Math.round(barW * ratio), barY + barH, 0xFF22C55E);
         }
 
-        // 3. AxolotlClient tarzı Armor HUD (1.21.11 EquipmentSlot uyumlu)
         if (showArmorHud) {
             int aw = 104;
             int ah = 26;
@@ -432,7 +424,6 @@ public class NexusMod implements ClientModInitializer {
             }
         }
 
-        // 4. AxolotlClient tarzı Keystrokes HUD
         if (showKeystrokesHud) {
             int kw = 76;
             int kh = 52;
