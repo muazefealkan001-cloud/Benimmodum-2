@@ -3,12 +3,12 @@ package com.nexus;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
-import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
+import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.Click;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.render.RenderTickCounter;
@@ -22,7 +22,6 @@ import net.minecraft.item.Items;
 import net.minecraft.particle.ParticleTypes;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
-import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
@@ -35,10 +34,6 @@ import java.util.Comparator;
 import java.util.Deque;
 import java.util.Iterator;
 import java.util.List;
-import java.util.function.BooleanSupplier;
-import java.util.function.Consumer;
-import java.util.function.DoubleConsumer;
-import java.util.function.DoubleSupplier;
 
 public class NexusMod implements ClientModInitializer {
 
@@ -46,7 +41,7 @@ public class NexusMod implements ClientModInitializer {
     public static final String MOD_NAME = "nexus";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
-    // Elytra PvP Modülleri
+    // Elytra PvP Ayarları
     public static boolean elytraControlEnabled = true;
     public static double steerResponsiveness = 0.085;
     public static double maxFlightSpeed = 2.45;
@@ -58,7 +53,7 @@ public class NexusMod implements ClientModInitializer {
     public static boolean targetAssistEnabled = true;
     public static double maxTargetRange = 48.0;
 
-    // Soup Visual Tarzı Efekt Ayarları
+    // Soup Visual Tarzı Ayarlar
     public static boolean soupVisualsEnabled = true;
     public static boolean hitParticlesEnabled = true;
     public static boolean jumpRingsEnabled = true;
@@ -76,7 +71,6 @@ public class NexusMod implements ClientModInitializer {
     public static boolean showArmorHud = true;
     public static boolean showKeystrokesHud = true;
 
-    // HUD Kutularının Ekran Koordinatları
     public static int statsHudX = 10;
     public static int statsHudY = 10;
     public static int targetHudX = 10;
@@ -129,11 +123,7 @@ public class NexusMod implements ClientModInitializer {
         ));
 
         ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
-
-        HudElementRegistry.addLast(
-                Identifier.of(MOD_ID, "hud_overlay"),
-                this::onHudRender
-        );
+        HudRenderCallback.EVENT.register(this::onHudRender);
     }
 
     private void onClientTick(MinecraftClient client) {
@@ -456,429 +446,84 @@ public class NexusMod implements ClientModInitializer {
 
     public static class NexusMenuScreen extends Screen {
 
-        private static final int COLOR_BACKDROP = 0x88060A13;
-        private static final int COLOR_PANEL = 0xF2101726;
-        private static final int COLOR_PANEL_HEADER = 0xFF162138;
-        private static final int COLOR_CARD = 0xFF172238;
-        private static final int COLOR_CARD_HOVER = 0xFF1E2C47;
-        private static final int COLOR_BORDER = 0xFF2B3F66;
-        private static final int COLOR_ACCENT = 0xFF38BDF8;
-        private static final int COLOR_ACCENT_SOFT = 0xFF0EA5E9;
-        private static final int COLOR_ON = 0xFF22C55E;
-        private static final int COLOR_OFF = 0xFFEF4444;
-        private static final int COLOR_TEXT = 0xFFF8FAFC;
-        private static final int COLOR_MUTED = 0xFF94A3B8;
-
-        private int selectedCategory = 0;
-        private final List<ControlRow> rows = new ArrayList<>();
-        private String activeSliderId = null;
-        private String draggingHudId = null;
-        private int dragOffsetX = 0;
-        private int dragOffsetY = 0;
-
         protected NexusMenuScreen() {
             super(Text.literal("Nexus Menu"));
         }
 
         @Override
         protected void init() {
-            rebuildRows();
-        }
+            int cx = this.width / 2 - 110;
+            int cy = 40;
+            int w = 220;
+            int h = 20;
+            int gap = 24;
 
-        private void rebuildRows() {
-            rows.clear();
-            if (selectedCategory == 0) {
-                rows.add(new ToggleRow("elytra", "Elytra Yön Kontrolü", "Hız vektörünü bakış yönüne hizalar",
-                        () -> elytraControlEnabled, v -> elytraControlEnabled = v));
-                rows.add(new SliderRow("steer", "Dönüş Hassasiyeti", "Yüksek değer daha keskin dönüş sağlar",
-                        0.01, 0.25, () -> steerResponsiveness, v -> steerResponsiveness = v, "%.3f"));
-                rows.add(new ToggleRow("rocket", "Otomatik Havai Fişek", "Hız düştüğünde hotbard'daki fişeği kullanır",
-                        () -> autoRocketEnabled, v -> autoRocketEnabled = v));
-                rows.add(new SliderRow("max_spd", "Maksimum Uçuş Hızı", "Süzülme hız tavanı",
-                        0.80, 4.50, () -> maxFlightSpeed, v -> maxFlightSpeed = v, "%.2f"));
-            } else if (selectedCategory == 1) {
-                rows.add(new ToggleRow("soup", "Soup Visual Efektleri", "Vuruş parçacıkları, halkalar ve izleri açar",
-                        () -> soupVisualsEnabled, v -> soupVisualsEnabled = v));
-                rows.add(new ToggleRow("thud", "Soup Target HUD", "Hedef can, mesafe ve bar göstergesi",
-                        () -> targetHudEnabled, v -> targetHudEnabled = v));
-                rows.add(new ToggleRow("rings", "Zıplama Halkaları & İz", "Zıplama halkası ve hareket izi parçacıkları",
-                        () -> jumpRingsEnabled && trailParticlesEnabled,
-                        v -> {
-                            jumpRingsEnabled = v;
-                            trailParticlesEnabled = v;
-                        }));
-                rows.add(new SliderRow("intens", "Efekt Yoğunluğu", "Parçacık ve halka genleşme şiddeti",
-                        4.0, 32.0, () -> (double) effectIntensity, v -> effectIntensity = (int) Math.round(v), "%.0f"));
-            } else if (selectedCategory == 2) {
-                rows.add(new ToggleRow("hud_m", "Axolotl HUD Ana Anahtarı", "Tüm ekran panellerini açar veya kapatır",
-                        () -> hudMasterEnabled, v -> hudMasterEnabled = v));
-                rows.add(new ToggleRow("fps_cps", "FPS / CPS / Ping / Speed", "Canlı performans ve hız metrikleri",
-                        () -> showFpsHud && showCpsHud && showPingHud && showSpeedHud,
-                        v -> {
-                            showFpsHud = v;
-                            showCpsHud = v;
-                            showPingHud = v;
-                            showSpeedHud = v;
-                        }));
-                rows.add(new ToggleRow("armor_h", "Zırh Göstergesi", "Kuşanılan zırhların dayanıklılık yüzdeleri",
-                        () -> showArmorHud, v -> showArmorHud = v));
-                rows.add(new ToggleRow("keys_h", "Keystrokes Paneli", "WASD ve fare tıklama göstergesi",
-                        () -> showKeystrokesHud, v -> showKeystrokesHud = v));
-            } else {
-                rows.add(new ToggleRow("target_a", "Hedef Kilit Analizi", "Bakışa en yakın rakibi otomatik seçer",
-                        () -> targetAssistEnabled, v -> targetAssistEnabled = v));
-                rows.add(new SliderRow("t_range", "Hedef Tarama Menzili", "Maksimum hedef mesafesi (blok)",
-                        12.0, 96.0, () -> maxTargetRange, v -> maxTargetRange = v, "%.0f m"));
-                rows.add(new SliderRow("min_spd", "Oto Fişek Hız Eşiği", "Bu hızın altına inince fişek tetiklenir",
-                        0.15, 1.80, () -> minSpeedThreshold, v -> minSpeedThreshold = v, "%.2f"));
-                rows.add(new SliderRow("r_cd", "Fişek Bekleme (Tick)", "Fişekler arası bekleme süresi",
-                        5.0, 60.0, () -> (double) rocketCooldownTicks, v -> rocketCooldownTicks = (int) Math.round(v), "%.0f t"));
-            }
+            addDrawableChild(ButtonWidget.builder(
+                    Text.literal("Elytra Kontrol: " + (elytraControlEnabled ? "AÇIK" : "KAPALI")),
+                    btn -> {
+                        elytraControlEnabled = !elytraControlEnabled;
+                        btn.setMessage(Text.literal("Elytra Kontrol: " + (elytraControlEnabled ? "AÇIK" : "KAPALI")));
+                    }).dimensions(cx, cy, w, h).build());
+
+            addDrawableChild(ButtonWidget.builder(
+                    Text.literal("Oto Fişek: " + (autoRocketEnabled ? "AÇIK" : "KAPALI")),
+                    btn -> {
+                        autoRocketEnabled = !autoRocketEnabled;
+                        btn.setMessage(Text.literal("Oto Fişek: " + (autoRocketEnabled ? "AÇIK" : "KAPALI")));
+                    }).dimensions(cx, cy + gap, w, h).build());
+
+            addDrawableChild(ButtonWidget.builder(
+                    Text.literal("Hedef Takip: " + (targetAssistEnabled ? "AÇIK" : "KAPALI")),
+                    btn -> {
+                        targetAssistEnabled = !targetAssistEnabled;
+                        btn.setMessage(Text.literal("Hedef Takip: " + (targetAssistEnabled ? "AÇIK" : "KAPALI")));
+                    }).dimensions(cx, cy + gap * 2, w, h).build());
+
+            addDrawableChild(ButtonWidget.builder(
+                    Text.literal("Soup Visual: " + (soupVisualsEnabled ? "AÇIK" : "KAPALI")),
+                    btn -> {
+                        soupVisualsEnabled = !soupVisualsEnabled;
+                        btn.setMessage(Text.literal("Soup Visual: " + (soupVisualsEnabled ? "AÇIK" : "KAPALI")));
+                    }).dimensions(cx, cy + gap * 3, w, h).build());
+
+            addDrawableChild(ButtonWidget.builder(
+                    Text.literal("Target HUD: " + (targetHudEnabled ? "AÇIK" : "KAPALI")),
+                    btn -> {
+                        targetHudEnabled = !targetHudEnabled;
+                        btn.setMessage(Text.literal("Target HUD: " + (targetHudEnabled ? "AÇIK" : "KAPALI")));
+                    }).dimensions(cx, cy + gap * 4, w, h).build());
+
+            addDrawableChild(ButtonWidget.builder(
+                    Text.literal("Axolotl HUD: " + (hudMasterEnabled ? "AÇIK" : "KAPALI")),
+                    btn -> {
+                        hudMasterEnabled = !hudMasterEnabled;
+                        btn.setMessage(Text.literal("Axolotl HUD: " + (hudMasterEnabled ? "AÇIK" : "KAPALI")));
+                    }).dimensions(cx, cy + gap * 5, w, h).build());
+
+            addDrawableChild(ButtonWidget.builder(
+                    Text.literal("HUD Konumlarını Sıfırla"),
+                    btn -> {
+                        statsHudX = 10; statsHudY = 10;
+                        targetHudX = 10; targetHudY = 92;
+                        armorHudX = 10; armorHudY = 152;
+                        keysHudX = 10; keysHudY = 205;
+                    }).dimensions(cx, cy + gap * 6, w, h).build());
         }
 
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-            context.fill(0, 0, this.width, this.height, COLOR_BACKDROP);
-
+            context.fill(0, 0, this.width, this.height, 0x88060A13);
             if (hudMasterEnabled && this.client != null) {
                 renderAllHudModules(context, this.textRenderer, this.client, true);
             }
-
-            int panelW = Math.min(540, this.width - 32);
-            int panelH = Math.min(316, this.height - 32);
-            int panelX = (this.width - panelW) / 2;
-            int panelY = (this.height - panelH) / 2;
-
-            context.fill(panelX, panelY, panelX + panelW, panelY + panelH, COLOR_PANEL);
-            drawRectBorder(context, panelX, panelY, panelW, panelH, COLOR_BORDER);
-
-            int headerH = 36;
-            context.fill(panelX, panelY, panelX + panelW, panelY + headerH, COLOR_PANEL_HEADER);
-            context.fill(panelX, panelY + headerH - 1, panelX + panelW, panelY + headerH, COLOR_ACCENT);
-
-            context.drawText(this.textRenderer, "NEXUS // ELYTRA + SOUP + AXOLOTL", panelX + 12, panelY + 10, COLOR_TEXT, true);
-            context.drawText(this.textRenderer, "1.21.11  •  [R-SHIFT]", panelX + panelW - 114, panelY + 13, COLOR_ACCENT, false);
-
-            int sidebarW = 128;
-            int bodyY = panelY + headerH + 8;
-            int bodyH = panelH - headerH - 36;
-            context.fill(panelX + 10, bodyY, panelX + 10 + sidebarW, bodyY + bodyH, 0xFF0C121E);
-            drawRectBorder(context, panelX + 10, bodyY, sidebarW, bodyH, 0xFF1E2C47);
-
-            String[] tabs = {"Elytra PvP", "Soup Visual", "Axolotl HUD", "İnce Ayar"};
-            for (int i = 0; i < tabs.length; i++) {
-                int tx = panelX + 15;
-                int ty = bodyY + 8 + i * 32;
-                int tw = sidebarW - 10;
-                int th = 26;
-                boolean active = (i == selectedCategory);
-                boolean hovered = mouseX >= tx && mouseX <= tx + tw && mouseY >= ty && mouseY <= ty + th;
-
-                if (active) {
-                    context.fill(tx, ty, tx + tw, ty + th, 0xFF172844);
-                    context.fill(tx, ty, tx + 3, ty + th, COLOR_ACCENT);
-                } else if (hovered) {
-                    context.fill(tx, ty, tx + tw, ty + th, 0xFF131D31);
-                }
-
-                context.drawText(this.textRenderer, tabs[i], tx + 9, ty + 9, active ? COLOR_TEXT : COLOR_MUTED, active);
-            }
-
-            int contentX = panelX + 10 + sidebarW + 10;
-            int contentW = panelX + panelW - 10 - contentX;
-
-            for (int i = 0; i < rows.size(); i++) {
-                ControlRow row = rows.get(i);
-                int ry = bodyY + 4 + i * 56;
-                int rh = 52;
-                row.render(context, this.textRenderer, contentX, ry, contentW, rh, mouseX, mouseY);
-            }
-
-            int footerY = panelY + panelH - 22;
-            context.fill(panelX + 10, footerY, panelX + panelW - 10, footerY + 15, 0xFF0C121E);
-            context.drawText(this.textRenderer, "HUD kutularını ekranda sürükleyebilirsin • Kapatmak için Sağ Shift",
-                    panelX + 14, footerY + 4, COLOR_MUTED, false);
-
+            context.drawCenteredTextWithShadow(this.textRenderer, "NEXUS // ELYTRA + SOUP + AXOLOTL (1.21.11)",
+                    this.width / 2, 18, 0xFF38BDF8);
             super.render(context, mouseX, mouseY, delta);
-        }
-
-        @Override
-        public boolean mouseClicked(Click click, boolean doubled) {
-            double mouseX = click.x();
-            double mouseY = click.y();
-            int button = click.button();
-
-            if (button == 0) {
-                int panelW = Math.min(540, this.width - 32);
-                int panelH = Math.min(316, this.height - 32);
-                int panelX = (this.width - panelW) / 2;
-                int panelY = (this.height - panelH) / 2;
-
-                boolean insideMainPanel = mouseX >= panelX && mouseX <= panelX + panelW
-                        && mouseY >= panelY && mouseY <= panelY + panelH;
-
-                if (insideMainPanel) {
-                    int headerH = 36;
-                    int sidebarW = 128;
-                    int bodyY = panelY + headerH + 8;
-
-                    for (int i = 0; i < 4; i++) {
-                        int tx = panelX + 15;
-                        int ty = bodyY + 8 + i * 32;
-                        int tw = sidebarW - 10;
-                        int th = 26;
-                        if (mouseX >= tx && mouseX <= tx + tw && mouseY >= ty && mouseY <= ty + th) {
-                            selectedCategory = i;
-                            activeSliderId = null;
-                            rebuildRows();
-                            return true;
-                        }
-                    }
-
-                    int contentX = panelX + 10 + sidebarW + 10;
-                    int contentW = panelX + panelW - 10 - contentX;
-                    for (int i = 0; i < rows.size(); i++) {
-                        ControlRow row = rows.get(i);
-                        int ry = bodyY + 4 + i * 56;
-                        int rh = 52;
-                        String draggedId = row.onClick(contentX, ry, contentW, rh, mouseX, mouseY);
-                        if (draggedId != null) {
-                            activeSliderId = draggedId;
-                            return true;
-                        }
-                    }
-                    return true;
-                }
-
-                if (mouseX >= statsHudX && mouseX <= statsHudX + 116 && mouseY >= statsHudY && mouseY <= statsHudY + 56) {
-                    draggingHudId = "stats";
-                    dragOffsetX = (int) mouseX - statsHudX;
-                    dragOffsetY = (int) mouseY - statsHudY;
-                    return true;
-                }
-                if (mouseX >= targetHudX && mouseX <= targetHudX + 144 && mouseY >= targetHudY && mouseY <= targetHudY + 42) {
-                    draggingHudId = "target";
-                    dragOffsetX = (int) mouseX - targetHudX;
-                    dragOffsetY = (int) mouseY - targetHudY;
-                    return true;
-                }
-                if (mouseX >= armorHudX && mouseX <= armorHudX + 104 && mouseY >= armorHudY && mouseY <= armorHudY + 26) {
-                    draggingHudId = "armor";
-                    dragOffsetX = (int) mouseX - armorHudX;
-                    dragOffsetY = (int) mouseY - armorHudY;
-                    return true;
-                }
-                if (mouseX >= keysHudX && mouseX <= keysHudX + 76 && mouseY >= keysHudY && mouseY <= keysHudY + 52) {
-                    draggingHudId = "keys";
-                    dragOffsetX = (int) mouseX - keysHudX;
-                    dragOffsetY = (int) mouseY - keysHudY;
-                    return true;
-                }
-            }
-            return super.mouseClicked(click, doubled);
-        }
-
-        @Override
-        public boolean mouseDragged(Click click, double deltaX, double deltaY) {
-            if (click.button() == 0) {
-                if (draggingHudId != null) {
-                    int nx = MathHelper.clamp((int) click.x() - dragOffsetX, 2, Math.max(2, this.width - 80));
-                    int ny = MathHelper.clamp((int) click.y() - dragOffsetY, 2, Math.max(2, this.height - 30));
-                    switch (draggingHudId) {
-                        case "stats" -> {
-                            statsHudX = nx;
-                            statsHudY = ny;
-                        }
-                        case "target" -> {
-                            targetHudX = nx;
-                            targetHudY = ny;
-                        }
-                        case "armor" -> {
-                            armorHudX = nx;
-                            armorHudY = ny;
-                        }
-                        case "keys" -> {
-                            keysHudX = nx;
-                            keysHudY = ny;
-                        }
-                    }
-                    return true;
-                }
-
-                if (activeSliderId != null) {
-                    int panelW = Math.min(540, this.width - 32);
-                    int panelH = Math.min(316, this.height - 32);
-                    int panelX = (this.width - panelW) / 2;
-                    int panelY = (this.height - panelH) / 2;
-
-                    int headerH = 36;
-                    int sidebarW = 128;
-                    int bodyY = panelY + headerH + 8;
-                    int contentX = panelX + 10 + sidebarW + 10;
-                    int contentW = panelX + panelW - 10 - contentX;
-
-                    for (int i = 0; i < rows.size(); i++) {
-                        ControlRow row = rows.get(i);
-                        int ry = bodyY + 4 + i * 56;
-                        int rh = 52;
-                        if (row.onDrag(contentX, ry, contentW, rh, click.x(), activeSliderId)) {
-                            return true;
-                        }
-                    }
-                }
-            }
-            return super.mouseDragged(click, deltaX, deltaY);
-        }
-
-        @Override
-        public boolean mouseReleased(Click click) {
-            if (click.button() == 0) {
-                activeSliderId = null;
-                draggingHudId = null;
-            }
-            return super.mouseReleased(click);
         }
 
         @Override
         public boolean shouldPause() {
             return false;
-        }
-
-        private interface ControlRow {
-            void render(DrawContext ctx, TextRenderer tr, int x, int y, int w, int h, int mx, int my);
-
-            String onClick(int x, int y, int w, int h, double mx, double my);
-
-            boolean onDrag(int x, int y, int w, int h, double mx, String activeSliderId);
-        }
-
-        private static class ToggleRow implements ControlRow {
-            private final String id;
-            private final String title;
-            private final String desc;
-            private final BooleanSupplier getter;
-            private final Consumer<Boolean> setter;
-
-            ToggleRow(String id, String title, String desc, BooleanSupplier getter, Consumer<Boolean> setter) {
-                this.id = id;
-                this.title = title;
-                this.desc = desc;
-                this.getter = getter;
-                this.setter = setter;
-            }
-
-            @Override
-            public void render(DrawContext ctx, TextRenderer tr, int x, int y, int w, int h, int mx, int my) {
-                boolean hovered = mx >= x && mx <= x + w && my >= y && my <= y + h;
-                ctx.fill(x, y, x + w, y + h, hovered ? COLOR_CARD_HOVER : COLOR_CARD);
-                drawRectBorder(ctx, x, y, w, h, COLOR_BORDER);
-
-                ctx.drawText(tr, title, x + 11, y + 9, COLOR_TEXT, true);
-                ctx.drawText(tr, desc, x + 11, y + 25, COLOR_MUTED, false);
-
-                boolean enabled = getter.getAsBoolean();
-                int pillW = 40;
-                int pillH = 16;
-                int px = x + w - pillW - 12;
-                int py = y + (h - pillH) / 2;
-
-                ctx.fill(px, py, px + pillW, py + pillH, enabled ? 0xFF14532D : 0xFF450A0A);
-                drawRectBorder(ctx, px, py, pillW, pillH, enabled ? COLOR_ON : COLOR_OFF);
-
-                int knob = 10;
-                int kx = enabled ? (px + pillW - knob - 3) : (px + 3);
-                ctx.fill(kx, py + 3, kx + knob, py + 3 + knob, enabled ? COLOR_ON : COLOR_OFF);
-            }
-
-            @Override
-            public String onClick(int x, int y, int w, int h, double mx, double my) {
-                if (mx >= x && mx <= x + w && my >= y && my <= y + h) {
-                    setter.accept(!getter.getAsBoolean());
-                }
-                return null;
-            }
-
-            @Override
-            public boolean onDrag(int x, int y, int w, int h, double mx, String activeSliderId) {
-                return false;
-            }
-        }
-
-        private static class SliderRow implements ControlRow {
-            private final String id;
-            private final String title;
-            private final String desc;
-            private final double min;
-            private final double max;
-            private final DoubleSupplier getter;
-            private final DoubleConsumer setter;
-            private final String format;
-
-            SliderRow(String id, String title, String desc, double min, double max,
-                      DoubleSupplier getter, DoubleConsumer setter, String format) {
-                this.id = id;
-                this.title = title;
-                this.desc = desc;
-                this.min = min;
-                this.max = max;
-                this.getter = getter;
-                this.setter = setter;
-                this.format = format;
-            }
-
-            @Override
-            public void render(DrawContext ctx, TextRenderer tr, int x, int y, int w, int h, int mx, int my) {
-                boolean hovered = mx >= x && mx <= x + w && my >= y && my <= y + h;
-                ctx.fill(x, y, x + w, y + h, hovered ? COLOR_CARD_HOVER : COLOR_CARD);
-                drawRectBorder(ctx, x, y, w, h, COLOR_BORDER);
-
-                double val = getter.getAsDouble();
-                String valStr = String.format(format, val);
-
-                ctx.drawText(tr, title, x + 11, y + 7, COLOR_TEXT, true);
-                ctx.drawText(tr, valStr, x + w - tr.getWidth(valStr) - 12, y + 7, COLOR_ACCENT, true);
-                ctx.drawText(tr, desc, x + 11, y + 19, COLOR_MUTED, false);
-
-                int barX = x + 11;
-                int barY = y + 36;
-                int barW = w - 22;
-                int barH = 6;
-
-                ctx.fill(barX, barY, barX + barW, barY + barH, 0xFF0B101B);
-                double ratio = Math.max(0.0, Math.min(1.0, (val - min) / (max - min)));
-                int fillW = (int) Math.round(barW * ratio);
-                ctx.fill(barX, barY, barX + fillW, barY + barH, COLOR_ACCENT_SOFT);
-                ctx.fill(barX + Math.max(0, fillW - 2), barY - 2, barX + Math.min(barW, fillW + 2), barY + barH + 2, COLOR_TEXT);
-            }
-
-            @Override
-            public String onClick(int x, int y, int w, int h, double mx, double my) {
-                int barX = x + 11;
-                int barY = y + 32;
-                int barW = w - 22;
-                int barH = 14;
-                if (mx >= barX - 4 && mx <= barX + barW + 4 && my >= barY && my <= barY + barH) {
-                    applyRatio(barX, barW, mx);
-                    return id;
-                }
-                return null;
-            }
-
-            @Override
-            public boolean onDrag(int x, int y, int w, int h, double mx, String activeSliderId) {
-                if (id.equals(activeSliderId)) {
-                    int barX = x + 11;
-                    int barW = w - 22;
-                    applyRatio(barX, barW, mx);
-                    return true;
-                }
-                return false;
-            }
-
-            private void applyRatio(int barX, int barW, double mx) {
-                double ratio = Math.max(0.0, Math.min(1.0, (mx - barX) / (double) barW));
-                setter.accept(min + ratio * (max - min));
-            }
         }
     }
 }
