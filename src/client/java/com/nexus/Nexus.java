@@ -1,6 +1,6 @@
 package com.nexus;
 
-import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.platform.GlStateManager;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
@@ -39,7 +39,6 @@ public class Nexus implements ClientModInitializer {
     public static final String MOD_ID = "nexus";
     public static final String CLIENT_TITLE = "NEXUS x AXOLOTL";
 
-    // Görsel & Kozmetik Modüller
     public static boolean axolotlBadge = true;
     public static boolean axolotlMascot = true;
     public static boolean santaHat = true;
@@ -213,9 +212,9 @@ public class Nexus implements ClientModInitializer {
     }
 
     private void renderJumpCircles(MatrixStack matrices, Vec3d cameraPos) {
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.disableCull();
+        GlStateManager._enableBlend();
+        GlStateManager._blendFunc(GlStateManager.SrcFactor.SRC_ALPHA.value, GlStateManager.DstFactor.ONE_MINUS_SRC_ALPHA.value);
+        GlStateManager._disableCull();
 
         Tessellator tessellator = Tessellator.getInstance();
         BufferBuilder buffer = tessellator.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
@@ -250,8 +249,8 @@ public class Nexus implements ClientModInitializer {
         BufferRenderer.drawWithGlobalProgram(buffer.end());
         matrices.pop();
 
-        RenderSystem.enableCull();
-        RenderSystem.disableBlend();
+        GlStateManager._enableCull();
+        GlStateManager._disableBlend();
     }
 
     private void renderSantaHatAbovePlayer(MatrixStack matrices, Vec3d cameraPos, PlayerEntity player) {
@@ -263,8 +262,8 @@ public class Nexus implements ClientModInitializer {
         float relX = (float) (px - cameraPos.x);
         float relZ = (float) (pz - cameraPos.z);
 
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
+        GlStateManager._enableBlend();
+        GlStateManager._blendFunc(GlStateManager.SrcFactor.SRC_ALPHA.value, GlStateManager.DstFactor.ONE_MINUS_SRC_ALPHA.value);
 
         Tessellator tessellator = Tessellator.getInstance();
         BufferBuilder buffer = tessellator.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
@@ -282,7 +281,7 @@ public class Nexus implements ClientModInitializer {
         BufferRenderer.drawWithGlobalProgram(buffer.end());
         matrices.pop();
 
-        RenderSystem.disableBlend();
+        GlStateManager._disableBlend();
     }
 
     private static void addBox(
