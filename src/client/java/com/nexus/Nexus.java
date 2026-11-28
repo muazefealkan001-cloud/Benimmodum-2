@@ -3,107 +3,119 @@ package com.nexus;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
-import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.render.RenderTickCounter;
-import net.minecraft.client.util.InputUtil;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.particle.ParticleTypes;
-import net.minecraft.text.Text;
-import net.minecraft.util.Hand;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.util.math.Vec3d;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
+import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.phys.Vec3;
 import org.lwjgl.glfw.GLFW;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
-import java.util.Iterator;
 import java.util.List;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
+import java.util.function.IntConsumer;
+import java.util.function.IntSupplier;
+import java.util.function.Supplier;
 
-public class NexusMod implements ClientModInitializer {
+public class Nexus implements ClientModInitializer {
 
-    public static final String MOD_ID = "nexus";
-    public static final String MOD_NAME = "nexus";
-    public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
+    // Elytra
+    static boolean elytraControlEnabled = true;
+    static double steerResponsiveness = 0.085;
+    static double maxFlightSpeed = 2.45;
+    static boolean autoRocketEnabled = true;
+    static double minSpeedThreshold = 0.65;
+    static int rocketCooldownTicks = 18;
+    static boolean targetAssistEnabled = true;
+    static double maxTargetRange = 48.0;
 
-    // Elytra PvP Ayarları
-    public static boolean elytraControlEnabled = true;
-    public static double steerResponsiveness = 0.085;
-    public static double maxFlightSpeed = 2.45;
+    // Gorsel efektler
+    static boolean soupVisualsEnabled = true;
+    static boolean hitParticlesEnabled = true;
+    static boolean jumpRingsEnabled = true;
+    static boolean trailParticlesEnabled = true;
+    static boolean targetHudEnabled = true;
+    static int effectIntensity = 12;
+    static float ringRadius = 1.15f;
 
-    public static boolean autoRocketEnabled = true;
-    public static double minSpeedThreshold = 0.65;
-    public static int rocketCooldownTicks = 18;
+    // HUD
+    static boolean hudMasterEnabled = true;
+    static boolean showFpsHud = true;
+    static boolean showCpsHud = true;
+    static boolean showPingHud = true;
+    static boolean showSpeedHud = true;
+    static boolean showArmorHud = true;
+    static boolean showKeystrokesHud = true;
 
-    public static boolean targetAssistEnabled = true;
-    public static double maxTargetRange = 48.0;
+    static int statsHudX = 10;
+    static int statsHudY = 10;
+    static int targetHudX = 10;
+    static int targetHudY = 92;
+    static int armorHudX = 10;
+    static int armorHudY = 152;
+    static int keysHudX = 10;
+    static int keysHudY = 205;
 
-    // Soup Visual Tarzı Ayarlar
-    public static boolean soupVisualsEnabled = true;
-    public static boolean hitParticlesEnabled = true;
-    public static boolean jumpRingsEnabled = true;
-    public static boolean trailParticlesEnabled = true;
-    public static boolean targetHudEnabled = true;
-    public static int effectIntensity = 12;
-    public static float ringRadius = 1.15f;
-
-    // AxolotlClient Tarzı HUD Ayarları
-    public static boolean hudMasterEnabled = true;
-    public static boolean showFpsHud = true;
-    public static boolean showCpsHud = true;
-    public static boolean showPingHud = true;
-    public static boolean showSpeedHud = true;
-    public static boolean showArmorHud = true;
-    public static boolean showKeystrokesHud = true;
-
-    public static int statsHudX = 10;
-    public static int statsHudY = 10;
-    public static int targetHudX = 10;
-    public static int targetHudY = 92;
-    public static int armorHudX = 10;
-    public static int armorHudY = 152;
-    public static int keysHudX = 10;
-    public static int keysHudY = 205;
-
-    private static KeyBinding openMenuKey;
+    private static KeyMapping openMenuKey;
     private static int rocketCooldown = 0;
-    private static PlayerEntity lockedTarget = null;
+    private static Player lockedTarget = null;
     private static LivingEntity lastAttackedTarget = null;
     private static long lastAttackTimeMs = 0L;
     private static boolean wasOnGround = true;
-    private static boolean prevAttackPressed = false;
-    private static boolean prevUsePressed = false;
+    private static boolean wasLeft = false;
+    private static boolean wasRight = false;
 
     private static final Deque<Long> leftClicksMs = new ArrayDeque<>();
     private static final Deque<Long> rightClicksMs = new ArrayDeque<>();
     private static final List<JumpRing> activeRings = new ArrayList<>();
 
-    private record JumpRing(Vec3d pos, float radius, int maxAge, int age) {
-        JumpRing advance(int intensity) {
-            return new JumpRing(pos, radius + (intensity * 0.004f), maxAge, age + 1);
+    private record JumpRing(Vec3 pos, float radius, int maxAge, int age) {
+        JumpRing advance() {
+            return new JumpRing(pos, radius + (effectIntensity * 0.004f), maxAge, age + 1);
         }
     }
 
-    public static PlayerEntity getLockedTarget() {
-        return lockedTarget;
+    @Override
+    public void onInitializeClient() {
+        KeyMapping.Category category = KeyMapping.Category.register(
+            Identifier.fromNamespaceAndPath("nexus", "main"));
+        openMenuKey = KeyBindingHelper.registerKeyBinding(
+            new KeyMapping("key.nexus.menu", GLFW.GLFW_KEY_RIGHT_SHIFT, category));
+
+        ClientTickEvents.END_CLIENT_TICK.register(Nexus::onClientTick);
+
+        HudElementRegistry.attachElementAfter(
+            VanillaHudElements.MISC_OVERLAYS,
+            Identifier.fromNamespaceAndPath("nexus", "hud"),
+            (graphics, tickCounter) -> {
+                Minecraft mc = Minecraft.getInstance();
+                if (!hudMasterEnabled || mc.player == null || mc.options.hideGui) return;
+                renderHud(graphics, mc);
+            }
+        );
     }
 
-    public static int getCps(Deque<Long> clicks) {
+    // ==================== Tick ====================
+
+    private static int getCps(Deque<Long> clicks) {
         long now = System.currentTimeMillis();
         while (!clicks.isEmpty() && now - clicks.peekFirst() > 1000L) {
             clicks.pollFirst();
@@ -111,420 +123,418 @@ public class NexusMod implements ClientModInitializer {
         return clicks.size();
     }
 
-    @Override
-    public void onInitializeClient() {
-        LOGGER.info("[{}] 1.21.11 Elytra PvP + Soup Visual + Axolotl HUD yüklendi.", MOD_NAME);
+    private static void onClientTick(Minecraft mc) {
+        if (rocketCooldown > 0) rocketCooldown--;
 
-        openMenuKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.nexus.menu",
-                InputUtil.Type.KEYSYM,
-                GLFW.GLFW_KEY_RIGHT_SHIFT,
-                KeyBinding.Category.MISC
-        ));
-
-        ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
-        HudRenderCallback.EVENT.register(this::onHudRender);
-    }
-
-    private void onClientTick(MinecraftClient client) {
-        if (rocketCooldown > 0) {
-            rocketCooldown--;
+        while (openMenuKey.consumeClick()) {
+            mc.setScreen(mc.screen instanceof NexusMenu ? null : new NexusMenu());
         }
 
-        while (openMenuKey.wasPressed()) {
-            if (client.currentScreen instanceof NexusMenuScreen) {
-                client.setScreen(null);
-            } else {
-                client.setScreen(new NexusMenuScreen());
-            }
-        }
-
-        ClientPlayerEntity player = client.player;
-        if (player == null || client.world == null) {
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) {
             lockedTarget = null;
             activeRings.clear();
             return;
         }
 
         long now = System.currentTimeMillis();
-        boolean attackDown = client.options.attackKey.isPressed();
-        boolean useDown = client.options.useKey.isPressed();
-
-        if (attackDown && !prevAttackPressed) {
-            leftClicksMs.addLast(now);
+        boolean left = mc.options.keyAttack.isDown();
+        boolean right = mc.options.keyUse.isDown();
+        if (mc.screen == null) {
+            if (left && !wasLeft) leftClicksMs.addLast(now);
+            if (right && !wasRight) rightClicksMs.addLast(now);
         }
-        if (useDown && !prevUsePressed) {
-            rightClicksMs.addLast(now);
-        }
-        prevAttackPressed = attackDown;
-        prevUsePressed = useDown;
+        wasLeft = left;
+        wasRight = right;
 
-        if (elytraControlEnabled && player.isGliding()) {
+        if (elytraControlEnabled && player.isFallFlying()) {
             applyElytraControl(player);
         }
 
-        if (autoRocketEnabled && player.isGliding() && rocketCooldown == 0 && client.interactionManager != null) {
-            tryAutoRocket(client, player);
+        if (autoRocketEnabled && player.isFallFlying()
+                && rocketCooldown == 0 && mc.gameMode != null) {
+            tryAutoRocket(mc, player);
         }
 
         if (targetAssistEnabled) {
-            updateLockedTarget(client, player);
+            updateLockedTarget(mc, player);
         } else {
             lockedTarget = null;
         }
 
         if (soupVisualsEnabled) {
-            Entity attacked = client.targetedEntity;
-            if (attacked instanceof LivingEntity living && attackDown) {
+            Entity attacked = mc.crosshairPickEntity;
+            if (attacked instanceof LivingEntity living && left) {
                 lastAttackedTarget = living;
                 lastAttackTimeMs = now;
-                if (hitParticlesEnabled) {
-                    spawnHitBurst(client, living);
-                }
+                if (hitParticlesEnabled) spawnHitBurst(mc, living);
             }
 
-            if (jumpRingsEnabled && wasOnGround && !player.isOnGround() && player.getVelocity().y > 0.1) {
+            if (jumpRingsEnabled && wasOnGround && !player.onGround()
+                    && player.getDeltaMovement().y > 0.1) {
                 activeRings.add(new JumpRing(
-                        new Vec3d(player.getX(), player.getY() + 0.05, player.getZ()),
-                        ringRadius,
-                        18,
-                        0
-                ));
+                    new Vec3(player.getX(), player.getY() + 0.05, player.getZ()),
+                    ringRadius, 18, 0));
             }
-            wasOnGround = player.isOnGround();
+            wasOnGround = player.onGround();
 
-            if (trailParticlesEnabled && (player.isGliding() || player.getVelocity().horizontalLength() > 0.25)) {
-                client.world.addParticleClient(
-                        player.isGliding() ? ParticleTypes.END_ROD : ParticleTypes.ELECTRIC_SPARK,
-                        player.getX(), player.getY() + 0.4, player.getZ(),
-                        0.0, 0.01, 0.0
-                );
+            if (trailParticlesEnabled
+                    && (player.isFallFlying() || player.getDeltaMovement().horizontalDistance() > 0.25)) {
+                mc.level.addParticle(
+                    player.isFallFlying() ? ParticleTypes.END_ROD : ParticleTypes.ELECTRIC_SPARK,
+                    player.getX(), player.getY() + 0.4, player.getZ(),
+                    0.0, 0.01, 0.0);
             }
 
-            updateJumpRings(client);
+            updateJumpRings(mc);
         }
     }
 
-    private void applyElytraControl(ClientPlayerEntity player) {
-        Vec3d currentVel = player.getVelocity();
-        double currentSpeed = currentVel.length();
-        if (currentSpeed < 0.05 || Double.isNaN(currentSpeed)) {
-            return;
-        }
+    private static void applyElytraControl(LocalPlayer player) {
+        Vec3 vel = player.getDeltaMovement();
+        double speed = vel.length();
+        if (speed < 0.05) return;
 
-        Vec3d lookDir = player.getRotationVector().normalize();
-        double targetSpeed = Math.min(currentSpeed, maxFlightSpeed);
-        Vec3d desiredVel = lookDir.multiply(targetSpeed);
-
-        double alpha = MathHelper.clamp(steerResponsiveness, 0.01, 0.50);
-        player.setVelocity(new Vec3d(
-                currentVel.x + (desiredVel.x - currentVel.x) * alpha,
-                currentVel.y + (desiredVel.y - currentVel.y) * alpha,
-                currentVel.z + (desiredVel.z - currentVel.z) * alpha
-        ));
+        Vec3 look = player.getLookAngle().normalize();
+        Vec3 desired = look.scale(Math.min(speed, maxFlightSpeed));
+        player.setDeltaMovement(new Vec3(
+            vel.x + (desired.x - vel.x) * steerResponsiveness,
+            vel.y + (desired.y - vel.y) * steerResponsiveness,
+            vel.z + (desired.z - vel.z) * steerResponsiveness));
     }
 
-    private void tryAutoRocket(MinecraftClient client, ClientPlayerEntity player) {
-        if (player.getVelocity().horizontalLength() >= minSpeedThreshold) {
-            return;
-        }
+    private static void tryAutoRocket(Minecraft mc, LocalPlayer player) {
+        if (player.getDeltaMovement().horizontalDistance() >= minSpeedThreshold) return;
 
-        int rocketSlot = -1;
-        for (int i = 0; i < 9; i++) {
-            ItemStack stack = player.getInventory().getStack(i);
-            if (!stack.isEmpty() && stack.isOf(Items.FIREWORK_ROCKET)) {
-                rocketSlot = i;
-                break;
+        for (InteractionHand hand : InteractionHand.values()) {
+            ItemStack stack = player.getItemInHand(hand);
+            if (stack.is(Items.FIREWORK_ROCKET)) {
+                mc.gameMode.useItem(player, hand);
+                rocketCooldown = rocketCooldownTicks;
+                return;
             }
         }
-
-        if (rocketSlot == -1 || client.interactionManager == null) {
-            return;
-        }
-
-        int previousSlot = player.getInventory().selectedSlot;
-        player.getInventory().selectedSlot = rocketSlot;
-        client.interactionManager.interactItem(player, Hand.MAIN_HAND);
-        player.getInventory().selectedSlot = previousSlot;
-
-        rocketCooldown = rocketCooldownTicks;
     }
 
-    private void updateLockedTarget(MinecraftClient client, ClientPlayerEntity player) {
-        if (client.world == null) {
-            lockedTarget = null;
-            return;
-        }
+    private static void updateLockedTarget(Minecraft mc, LocalPlayer player) {
+        Vec3 eye = player.getEyePosition();
+        Vec3 look = player.getLookAngle().normalize();
 
-        Vec3d eyePos = player.getEyePos();
-        Vec3d lookVec = player.getRotationVector().normalize();
-
-        lockedTarget = client.world.getPlayers().stream()
-                .filter(p -> p != player && p.isAlive() && !p.isSpectator())
-                .filter(p -> p.distanceTo(player) <= maxTargetRange)
-                .min(Comparator.comparingDouble(p -> angularDistance(eyePos, lookVec, p)))
-                .orElse(null);
+        lockedTarget = mc.level.players().stream()
+            .filter(p -> p != player && p.isAlive() && !p.isSpectator())
+            .filter(p -> p.distanceTo(player) <= maxTargetRange)
+            .min(Comparator.comparingDouble(p -> angle(eye, look, p)))
+            .orElse(null);
     }
 
-    private double angularDistance(Vec3d eyePos, Vec3d lookVec, PlayerEntity target) {
-        Vec3d toTarget = target.getBoundingBox().getCenter().subtract(eyePos).normalize();
-        double dot = Math.max(-1.0, Math.min(1.0, lookVec.dotProduct(toTarget)));
+    private static double angle(Vec3 eye, Vec3 look, Player target) {
+        Vec3 to = target.getBoundingBox().getCenter().subtract(eye).normalize();
+        double dot = Math.max(-1.0, Math.min(1.0, look.dot(to)));
         return Math.acos(dot);
     }
 
-    private void spawnHitBurst(MinecraftClient client, LivingEntity target) {
-        if (client.world == null) {
-            return;
-        }
+    private static void spawnHitBurst(Minecraft mc, LivingEntity target) {
         int count = Math.max(4, Math.min(32, effectIntensity));
         for (int i = 0; i < count; i++) {
-            double angle = (Math.PI * 2.0 * i) / count;
-            double vx = Math.cos(angle) * 0.14;
-            double vz = Math.sin(angle) * 0.14;
-            client.world.addParticleClient(
-                    ParticleTypes.CRIT,
-                    target.getX(), target.getY() + target.getHeight() * 0.6, target.getZ(),
-                    vx, 0.08, vz
-            );
+            double a = (Math.PI * 2.0 * i) / count;
+            mc.level.addParticle(ParticleTypes.CRIT,
+                target.getX(), target.getY() + target.getBbHeight() * 0.6, target.getZ(),
+                Math.cos(a) * 0.14, 0.08, Math.sin(a) * 0.14);
         }
     }
 
-    private void updateJumpRings(MinecraftClient client) {
-        if (client.world == null) {
-            activeRings.clear();
-            return;
-        }
-
-        List<JumpRing> nextRings = new ArrayList<>();
-        Iterator<JumpRing> it = activeRings.iterator();
-        while (it.hasNext()) {
-            JumpRing ring = it.next();
-            if (ring.age() >= ring.maxAge()) {
-                continue;
-            }
+    private static void updateJumpRings(Minecraft mc) {
+        List<JumpRing> next = new ArrayList<>();
+        for (JumpRing ring : activeRings) {
+            if (ring.age() >= ring.maxAge()) continue;
             int points = 16;
             for (int i = 0; i < points; i++) {
-                double theta = (Math.PI * 2.0 * i) / points;
-                double px = ring.pos().x + Math.cos(theta) * ring.radius();
-                double pz = ring.pos().z + Math.sin(theta) * ring.radius();
-                client.world.addParticleClient(ParticleTypes.GLOW, px, ring.pos().y, pz, 0.0, 0.0, 0.0);
+                double t = (Math.PI * 2.0 * i) / points;
+                mc.level.addParticle(ParticleTypes.GLOW,
+                    ring.pos().x + Math.cos(t) * ring.radius(),
+                    ring.pos().y,
+                    ring.pos().z + Math.sin(t) * ring.radius(),
+                    0.0, 0.0, 0.0);
             }
-            nextRings.add(ring.advance(effectIntensity));
+            next.add(ring.advance());
         }
         activeRings.clear();
-        activeRings.addAll(nextRings);
+        activeRings.addAll(next);
     }
 
-    private void onHudRender(DrawContext ctx, RenderTickCounter tickCounter) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (!hudMasterEnabled || mc.player == null || mc.currentScreen instanceof NexusMenuScreen) {
-            return;
-        }
-        renderAllHudModules(ctx, mc.textRenderer, mc, false);
+    // ==================== HUD ====================
+
+    private static void border(GuiGraphics g, int x, int y, int w, int h, int c) {
+        g.fill(x, y, x + w, y + 1, c);
+        g.fill(x, y + h - 1, x + w, y + h, c);
+        g.fill(x, y, x + 1, y + h, c);
+        g.fill(x + w - 1, y, x + w, y + h, c);
     }
 
-    private static void renderAllHudModules(DrawContext ctx, TextRenderer tr, MinecraftClient mc, boolean previewMode) {
-        if (mc.player == null) {
-            return;
-        }
+    private static void keyBox(GuiGraphics g, Minecraft mc, int x, int y,
+                               int w, int h, String label, boolean pressed) {
+        g.fill(x, y, x + w, y + h, pressed ? 0xCC38BDF8 : 0x881E293B);
+        border(g, x, y, w, h, pressed ? 0xFFE0F2FE : 0xFF475569);
+        int tx = x + (w - mc.font.width(label)) / 2;
+        int ty = y + (h - 7) / 2;
+        g.drawString(mc.font, label, tx, ty, pressed ? 0xFF0F172A : 0xFFF8FAFC, false);
+    }
 
+    private static void renderHud(GuiGraphics g, Minecraft mc) {
+        LocalPlayer p = mc.player;
+
+        // Istatistikler
         List<String> lines = new ArrayList<>();
-        if (showFpsHud) {
-            lines.add("FPS: " + mc.getCurrentFps());
-        }
+        if (showFpsHud) lines.add("FPS: " + mc.getFps());
         if (showCpsHud) {
             lines.add("CPS: " + getCps(leftClicksMs) + " | " + getCps(rightClicksMs));
         }
         if (showPingHud) {
             int ping = 0;
-            if (mc.getNetworkHandler() != null && mc.getNetworkHandler().getPlayerListEntry(mc.player.getUuid()) != null) {
-                ping = mc.getNetworkHandler().getPlayerListEntry(mc.player.getUuid()).getLatency();
+            var conn = mc.getConnection();
+            if (conn != null) {
+                var info = conn.getPlayerInfo(p.getUUID());
+                if (info != null) ping = info.getLatency();
             }
             lines.add("Ping: " + ping + " ms");
         }
         if (showSpeedHud) {
-            double bps = mc.player.getVelocity().length() * 20.0;
-            lines.add(String.format("Speed: %.1f b/s%s", bps, mc.player.isGliding() ? " [ELYTRA]" : ""));
+            double bps = p.getDeltaMovement().length() * 20.0;
+            lines.add(String.format("Speed: %.1f b/s%s", bps,
+                p.isFallFlying() ? " [ELYTRA]" : ""));
         }
-
         if (!lines.isEmpty()) {
-            int boxW = 116;
-            int boxH = 8 + lines.size() * 11;
-            ctx.fill(statsHudX, statsHudY, statsHudX + boxW, statsHudY + boxH, 0x990D1424);
-            drawRectBorder(ctx, statsHudX, statsHudY, boxW, boxH, previewMode ? 0xFF38BDF8 : 0xFF233554);
+            int w = 112;
+            int h = 8 + lines.size() * 11;
+            g.fill(statsHudX, statsHudY, statsHudX + w, statsHudY + h, 0x990D1424);
+            border(g, statsHudX, statsHudY, w, h, 0xFF233554);
             for (int i = 0; i < lines.size(); i++) {
-                ctx.drawText(tr, lines.get(i), statsHudX + 6, statsHudY + 5 + i * 11, 0xFFF8FAFC, true);
+                g.drawString(mc.font, lines.get(i),
+                    statsHudX + 6, statsHudY + 5 + i * 11, 0xFFF8FAFC, true);
             }
         }
 
+        // Hedef HUD
         LivingEntity target = lockedTarget;
         if (target == null && System.currentTimeMillis() - lastAttackTimeMs < 3500L) {
             target = lastAttackedTarget;
         }
-        if (target == null && previewMode) {
-            target = mc.player;
-        }
-
-        if (targetHudEnabled && target != null) {
-            int tw = 144;
+        if (targetHudEnabled && target != null && target.isAlive()) {
+            int tw = 142;
             int th = 42;
-            ctx.fill(targetHudX, targetHudY, targetHudX + tw, targetHudY + th, 0xA8111827);
-            drawRectBorder(ctx, targetHudX, targetHudY, tw, th, previewMode ? 0xFF38BDF8 : 0xFFEF4444);
+            g.fill(targetHudX, targetHudY, targetHudX + tw, targetHudY + th, 0xA8111827);
+            border(g, targetHudX, targetHudY, tw, th, 0xFFEF4444);
 
-            String name = target.getName().getString();
             float hp = Math.max(0f, target.getHealth());
             float maxHp = Math.max(1f, target.getMaxHealth());
-            float ratio = MathHelper.clamp(hp / maxHp, 0f, 1f);
+            float ratio = Math.max(0f, Math.min(1f, hp / maxHp));
 
-            ctx.drawText(tr, name, targetHudX + 7, targetHudY + 6, 0xFFF8FAFC, true);
-            ctx.drawText(tr, String.format("%.1f HP  •  %.1fm", hp, target.distanceTo(mc.player)),
-                    targetHudX + 7, targetHudY + 18, 0xFFCBD5E1, false);
+            g.drawString(mc.font, target.getName().getString(),
+                targetHudX + 7, targetHudY + 6, 0xFFF8FAFC, true);
+            g.drawString(mc.font,
+                String.format("%.1f HP - %.1fm", hp, target.distanceTo(p)),
+                targetHudX + 7, targetHudY + 18, 0xFFCBD5E1, false);
 
-            int barX = targetHudX + 7;
-            int barY = targetHudY + 30;
-            int barW = tw - 14;
-            int barH = 6;
-            ctx.fill(barX, barY, barX + barW, barY + barH, 0xFF1F2937);
-            ctx.fill(barX, barY, barX + Math.round(barW * ratio), barY + barH, 0xFF22C55E);
+            int bx = targetHudX + 7;
+            int by = targetHudY + 30;
+            int bw = tw - 14;
+            g.fill(bx, by, bx + bw, by + 6, 0xFF1F2937);
+            g.fill(bx, by, bx + Math.round(bw * ratio), by + 6, 0xFF22C55E);
         }
 
+        // Zirh
         if (showArmorHud) {
-            int aw = 104;
-            int ah = 26;
-            ctx.fill(armorHudX, armorHudY, armorHudX + aw, armorHudY + ah, 0x990D1424);
-            drawRectBorder(ctx, armorHudX, armorHudY, aw, ah, previewMode ? 0xFF38BDF8 : 0xFF233554);
+            int aw = 96;
+            int ah = 24;
+            g.fill(armorHudX, armorHudY, armorHudX + aw, armorHudY + ah, 0x990D1424);
+            border(g, armorHudX, armorHudY, aw, ah, 0xFF233554);
 
             EquipmentSlot[] slots = {
-                    EquipmentSlot.HEAD,
-                    EquipmentSlot.CHEST,
-                    EquipmentSlot.LEGS,
-                    EquipmentSlot.FEET
+                EquipmentSlot.HEAD, EquipmentSlot.CHEST,
+                EquipmentSlot.LEGS, EquipmentSlot.FEET
             };
             for (int i = 0; i < slots.length; i++) {
-                ItemStack st = mc.player.getEquippedStack(slots[i]);
-                int ix = armorHudX + 5 + i * 24;
+                ItemStack st = p.getItemBySlot(slots[i]);
+                int ix = armorHudX + 5 + i * 22;
                 int iy = armorHudY + 4;
-                if (st != null && !st.isEmpty()) {
-                    ctx.drawItem(st, ix, iy);
-                    if (st.isDamageable() && st.getMaxDamage() > 0) {
-                        int pct = Math.round(((st.getMaxDamage() - st.getDamage()) / (float) st.getMaxDamage()) * 100f);
-                        ctx.drawText(tr, pct + "%", ix, iy + 15, pct > 25 ? 0xFF94A3B8 : 0xFFEF4444, false);
-                    }
+                if (st.isEmpty()) continue;
+                g.renderItem(st, ix, iy);
+                if (st.isDamageableItem()) {
+                    int max = st.getMaxDamage();
+                    int pct = Math.round(((max - st.getDamageValue()) / (float) max) * 100f);
+                    g.drawString(mc.font, pct + "%", ix, iy + 14,
+                        pct > 25 ? 0xFF94A3B8 : 0xFFEF4444, false);
                 }
             }
         }
 
+        // Keystrokes
         if (showKeystrokesHud) {
             int kw = 76;
             int kh = 52;
-            ctx.fill(keysHudX, keysHudY, keysHudX + kw, keysHudY + kh, 0x880D1424);
-            drawRectBorder(ctx, keysHudX, keysHudY, kw, kh, previewMode ? 0xFF38BDF8 : 0xFF233554);
+            g.fill(keysHudX, keysHudY, keysHudX + kw, keysHudY + kh, 0x880D1424);
+            border(g, keysHudX, keysHudY, kw, kh, 0xFF233554);
 
-            drawKeyBox(ctx, tr, keysHudX + 28, keysHudY + 4, 20, 14, "W", mc.options.forwardKey.isPressed());
-            drawKeyBox(ctx, tr, keysHudX + 6, keysHudY + 20, 20, 14, "A", mc.options.leftKey.isPressed());
-            drawKeyBox(ctx, tr, keysHudX + 28, keysHudY + 20, 20, 14, "S", mc.options.backKey.isPressed());
-            drawKeyBox(ctx, tr, keysHudX + 50, keysHudY + 20, 20, 14, "D", mc.options.rightKey.isPressed());
-            drawKeyBox(ctx, tr, keysHudX + 6, keysHudY + 36, 31, 12, "LMB", mc.options.attackKey.isPressed());
-            drawKeyBox(ctx, tr, keysHudX + 39, keysHudY + 36, 31, 12, "RMB", mc.options.useKey.isPressed());
+            keyBox(g, mc, keysHudX + 28, keysHudY + 4, 20, 14, "W", mc.options.keyUp.isDown());
+            keyBox(g, mc, keysHudX + 6, keysHudY + 20, 20, 14, "A", mc.options.keyLeft.isDown());
+            keyBox(g, mc, keysHudX + 28, keysHudY + 20, 20, 14, "S", mc.options.keyDown.isDown());
+            keyBox(g, mc, keysHudX + 50, keysHudY + 20, 20, 14, "D", mc.options.keyRight.isDown());
+            keyBox(g, mc, keysHudX + 6, keysHudY + 36, 31, 12, "LMB", mc.options.keyAttack.isDown());
+            keyBox(g, mc, keysHudX + 39, keysHudY + 36, 31, 12, "RMB", mc.options.keyUse.isDown());
         }
     }
 
-    private static void drawKeyBox(DrawContext ctx, TextRenderer tr, int x, int y, int w, int h, String label, boolean pressed) {
-        ctx.fill(x, y, x + w, y + h, pressed ? 0xCC38BDF8 : 0x881E293B);
-        drawRectBorder(ctx, x, y, w, h, pressed ? 0xFFE0F2FE : 0xFF475569);
-        int tx = x + (w - tr.getWidth(label)) / 2;
-        int ty = y + (h - 7) / 2;
-        ctx.drawText(tr, label, tx, ty, pressed ? 0xFF0F172A : 0xFFF8FAFC, false);
-    }
+    // ==================== Menu ====================
 
-    private static void drawRectBorder(DrawContext ctx, int x, int y, int w, int h, int color) {
-        ctx.fill(x, y, x + w, y + 1, color);
-        ctx.fill(x, y + h - 1, x + w, y + h, color);
-        ctx.fill(x, y, x + 1, y + h, color);
-        ctx.fill(x + w - 1, y, x + w, y + h, color);
-    }
+    public static class NexusMenu extends Screen {
 
-    public static class NexusMenuScreen extends Screen {
+        private static int category = 0;
 
-        protected NexusMenuScreen() {
-            super(Text.literal("Nexus Menu"));
+        public NexusMenu() {
+            super(Component.literal("Nexus"));
+        }
+
+        @Override
+        public boolean isPauseScreen() {
+            return false;
         }
 
         @Override
         protected void init() {
-            int cx = this.width / 2 - 110;
-            int cy = 40;
-            int w = 220;
-            int h = 20;
-            int gap = 24;
-
-            addDrawableChild(ButtonWidget.builder(
-                    Text.literal("Elytra Kontrol: " + (elytraControlEnabled ? "AÇIK" : "KAPALI")),
-                    btn -> {
-                        elytraControlEnabled = !elytraControlEnabled;
-                        btn.setMessage(Text.literal("Elytra Kontrol: " + (elytraControlEnabled ? "AÇIK" : "KAPALI")));
-                    }).dimensions(cx, cy, w, h).build());
-
-            addDrawableChild(ButtonWidget.builder(
-                    Text.literal("Oto Fişek: " + (autoRocketEnabled ? "AÇIK" : "KAPALI")),
-                    btn -> {
-                        autoRocketEnabled = !autoRocketEnabled;
-                        btn.setMessage(Text.literal("Oto Fişek: " + (autoRocketEnabled ? "AÇIK" : "KAPALI")));
-                    }).dimensions(cx, cy + gap, w, h).build());
-
-            addDrawableChild(ButtonWidget.builder(
-                    Text.literal("Hedef Takip: " + (targetAssistEnabled ? "AÇIK" : "KAPALI")),
-                    btn -> {
-                        targetAssistEnabled = !targetAssistEnabled;
-                        btn.setMessage(Text.literal("Hedef Takip: " + (targetAssistEnabled ? "AÇIK" : "KAPALI")));
-                    }).dimensions(cx, cy + gap * 2, w, h).build());
-
-            addDrawableChild(ButtonWidget.builder(
-                    Text.literal("Soup Visual: " + (soupVisualsEnabled ? "AÇIK" : "KAPALI")),
-                    btn -> {
-                        soupVisualsEnabled = !soupVisualsEnabled;
-                        btn.setMessage(Text.literal("Soup Visual: " + (soupVisualsEnabled ? "AÇIK" : "KAPALI")));
-                    }).dimensions(cx, cy + gap * 3, w, h).build());
-
-            addDrawableChild(ButtonWidget.builder(
-                    Text.literal("Target HUD: " + (targetHudEnabled ? "AÇIK" : "KAPALI")),
-                    btn -> {
-                        targetHudEnabled = !targetHudEnabled;
-                        btn.setMessage(Text.literal("Target HUD: " + (targetHudEnabled ? "AÇIK" : "KAPALI")));
-                    }).dimensions(cx, cy + gap * 4, w, h).build());
-
-            addDrawableChild(ButtonWidget.builder(
-                    Text.literal("Axolotl HUD: " + (hudMasterEnabled ? "AÇIK" : "KAPALI")),
-                    btn -> {
-                        hudMasterEnabled = !hudMasterEnabled;
-                        btn.setMessage(Text.literal("Axolotl HUD: " + (hudMasterEnabled ? "AÇIK" : "KAPALI")));
-                    }).dimensions(cx, cy + gap * 5, w, h).build());
-
-            addDrawableChild(ButtonWidget.builder(
-                    Text.literal("HUD Konumlarını Sıfırla"),
-                    btn -> {
-                        statsHudX = 10; statsHudY = 10;
-                        targetHudX = 10; targetHudY = 92;
-                        armorHudX = 10; armorHudY = 152;
-                        keysHudX = 10; keysHudY = 205;
-                    }).dimensions(cx, cy + gap * 6, w, h).build());
-        }
-
-        @Override
-        public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-            context.fill(0, 0, this.width, this.height, 0x88060A13);
-            if (hudMasterEnabled && this.client != null) {
-                renderAllHudModules(context, this.textRenderer, this.client, true);
+            String[] tabs = {"Elytra", "Gorsel", "HUD", "Konum"};
+            int x0 = width / 2 - 144;
+            for (int i = 0; i < tabs.length; i++) {
+                final int idx = i;
+                String label = (i == category ? "> " : "") + tabs[i];
+                addRenderableWidget(Button.builder(Component.literal(label), b -> {
+                    category = idx;
+                    rebuildWidgets();
+                }).bounds(x0 + i * 72, 28, 70, 20).build());
             }
-            context.drawCenteredTextWithShadow(this.textRenderer, "NEXUS // ELYTRA + SOUP + AXOLOTL (1.21.11)",
-                    this.width / 2, 18, 0xFF38BDF8);
-            super.render(context, mouseX, mouseY, delta);
+
+            int y = 56;
+            if (category == 0) {
+                toggle(y, "Yon kontrolu", () -> elytraControlEnabled, v -> elytraControlEnabled = v);
+                y += 22;
+                stepper(y, "Donus", () -> String.format("%.3f", steerResponsiveness),
+                    () -> steerResponsiveness = Math.max(0.01, steerResponsiveness - 0.01),
+                    () -> steerResponsiveness = Math.min(0.25, steerResponsiveness + 0.01));
+                y += 22;
+                toggle(y, "Oto fisek", () -> autoRocketEnabled, v -> autoRocketEnabled = v);
+                y += 22;
+                stepper(y, "Maks hiz", () -> String.format("%.2f", maxFlightSpeed),
+                    () -> maxFlightSpeed = Math.max(0.8, maxFlightSpeed - 0.1),
+                    () -> maxFlightSpeed = Math.min(4.5, maxFlightSpeed + 0.1));
+                y += 22;
+                stepper(y, "Fisek esigi", () -> String.format("%.2f", minSpeedThreshold),
+                    () -> minSpeedThreshold = Math.max(0.15, minSpeedThreshold - 0.05),
+                    () -> minSpeedThreshold = Math.min(1.8, minSpeedThreshold + 0.05));
+                y += 22;
+                stepper(y, "Fisek bekleme", () -> rocketCooldownTicks + " t",
+                    () -> rocketCooldownTicks = Math.max(5, rocketCooldownTicks - 2),
+                    () -> rocketCooldownTicks = Math.min(60, rocketCooldownTicks + 2));
+            } else if (category == 1) {
+                toggle(y, "Efektler", () -> soupVisualsEnabled, v -> soupVisualsEnabled = v);
+                y += 22;
+                toggle(y, "Vurus parcacik", () -> hitParticlesEnabled, v -> hitParticlesEnabled = v);
+                y += 22;
+                toggle(y, "Ziplama halka", () -> jumpRingsEnabled, v -> jumpRingsEnabled = v);
+                y += 22;
+                toggle(y, "Iz parcacik", () -> trailParticlesEnabled, v -> trailParticlesEnabled = v);
+                y += 22;
+                toggle(y, "Hedef HUD", () -> targetHudEnabled, v -> targetHudEnabled = v);
+                y += 22;
+                stepper(y, "Yogunluk", () -> String.valueOf(effectIntensity),
+                    () -> effectIntensity = Math.max(4, effectIntensity - 2),
+                    () -> effectIntensity = Math.min(32, effectIntensity + 2));
+            } else if (category == 2) {
+                toggle(y, "HUD ana", () -> hudMasterEnabled, v -> hudMasterEnabled = v);
+                y += 22;
+                toggle(y, "FPS", () -> showFpsHud, v -> showFpsHud = v);
+                y += 22;
+                toggle(y, "CPS", () -> showCpsHud, v -> showCpsHud = v);
+                y += 22;
+                toggle(y, "Ping", () -> showPingHud, v -> showPingHud = v);
+                y += 22;
+                toggle(y, "Hiz", () -> showSpeedHud, v -> showSpeedHud = v);
+                y += 22;
+                toggle(y, "Zirh", () -> showArmorHud, v -> showArmorHud = v);
+                y += 22;
+                toggle(y, "Keystrokes", () -> showKeystrokesHud, v -> showKeystrokesHud = v);
+            } else {
+                toggle(y, "Hedef kilidi", () -> targetAssistEnabled, v -> targetAssistEnabled = v);
+                y += 22;
+                stepper(y, "Menzil", () -> (int) maxTargetRange + " m",
+                    () -> maxTargetRange = Math.max(12, maxTargetRange - 4),
+                    () -> maxTargetRange = Math.min(96, maxTargetRange + 4));
+                y += 22;
+                mover(y, "Istatistik", () -> statsHudX, v -> statsHudX = v,
+                    () -> statsHudY, v -> statsHudY = v);
+                y += 22;
+                mover(y, "Hedef", () -> targetHudX, v -> targetHudX = v,
+                    () -> targetHudY, v -> targetHudY = v);
+                y += 22;
+                mover(y, "Zirh", () -> armorHudX, v -> armorHudX = v,
+                    () -> armorHudY, v -> armorHudY = v);
+                y += 22;
+                mover(y, "Tuslar", () -> keysHudX, v -> keysHudX = v,
+                    () -> keysHudY, v -> keysHudY = v);
+            }
+        }
+
+        private void toggle(int y, String label, BooleanSupplier get, Consumer<Boolean> set) {
+            int x = width / 2 - 100;
+            String text = label + ": " + (get.getAsBoolean() ? "ACIK" : "KAPALI");
+            addRenderableWidget(Button.builder(Component.literal(text), b -> {
+                set.accept(!get.getAsBoolean());
+                rebuildWidgets();
+            }).bounds(x, y, 200, 20).build());
+        }
+
+        private void stepper(int y, String label, Supplier<String> value,
+                             Runnable dec, Runnable inc) {
+            int x = width / 2 - 100;
+            Button name = Button.builder(
+                Component.literal(label + ": " + value.get()), b -> { })
+                .bounds(x, y, 150, 20).build();
+            name.active = false;
+            addRenderableWidget(name);
+            addRenderableWidget(Button.builder(Component.literal("-"), b -> {
+                dec.run();
+                rebuildWidgets();
+            }).bounds(x + 152, y, 22, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("+"), b -> {
+                inc.run();
+                rebuildWidgets();
+            }).bounds(x + 176, y, 22, 20).build());
+        }
+
+        private void mover(int y, String label, IntSupplier gx, IntConsumer sx,
+                           IntSupplier gy, IntConsumer sy) {
+            int x = width / 2 - 100;
+            Button name = Button.builder(Component.literal(label), b -> { })
+                .bounds(x, y, 100, 20).build();
+            name.active = false;
+            addRenderableWidget(name);
+            addRenderableWidget(Button.builder(Component.literal("<"),
+                b -> sx.accept(Math.max(0, gx.getAsInt() - 10)))
+                .bounds(x + 102, y, 22, 20).build());
+            addRenderableWidget(Button.builder(Component.literal(">"),
+                b -> sx.accept(gx.getAsInt() + 10))
+                .bounds(x + 126, y, 22, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("^"),
+                b -> sy.accept(Math.max(0, gy.getAsInt() - 10)))
+                .bounds(x + 150, y, 22, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("v"),
+                b -> sy.accept(gy.getAsInt() + 10))
+                .bounds(x + 174, y, 22, 20).build());
         }
 
         @Override
-        public boolean shouldPause() {
-            return false;
+        public void render(GuiGraphics graphics, int mouseX, int mouseY, float delta) {
+            super.render(graphics, mouseX, mouseY, delta);
+            graphics.drawString(font, "NEXUS", width / 2 - 144, 12, 0xFFB56CFF, true);
+            graphics.drawString(font, "Kapat: ESC", width / 2 + 60, 12, 0xFFAAAAAA, true);
         }
     }
 }
-
