@@ -1,4 +1,4 @@
-package com.nexus.client;
+package com.nexus;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.fabricmc.api.ClientModInitializer;
@@ -8,10 +8,16 @@ import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.render.*;
+import net.minecraft.client.render.BufferBuilder;
+import net.minecraft.client.render.BufferRenderer;
+import net.minecraft.client.render.RenderTickCounter;
+import net.minecraft.client.render.Tessellator;
+import net.minecraft.client.render.VertexFormat;
+import net.minecraft.client.render.VertexFormats;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.entity.player.PlayerEntity;
@@ -33,7 +39,7 @@ public class Nexus implements ClientModInitializer {
     public static final String MOD_ID = "nexus";
     public static final String CLIENT_TITLE = "NEXUS x AXOLOTL";
 
-    // Görsel & Kozmetik Modül Bayrakları
+    // Görsel & Kozmetik Modüller
     public static boolean axolotlBadge = true;
     public static boolean axolotlMascot = true;
     public static boolean santaHat = true;
@@ -41,14 +47,11 @@ public class Nexus implements ClientModInitializer {
     public static boolean crosshairSpin = true;
     public static boolean frostedDashboard = true;
 
-    // 1.21.11 KeyBinding / KeyEvent uyumlu menü tuşu
     public static KeyBinding openDashboardKey;
 
-    // Jump Circles aktif halkaları
     private static final List<JumpRing> activeRings = new ArrayList<>();
     private static boolean wasOnGround = true;
 
-    // Crosshair Spin animasyon durumu
     private static float spinAngle = 0.0f;
     private static float focusProgress = 0.0f;
 
@@ -77,7 +80,6 @@ public class Nexus implements ClientModInitializer {
             return;
         }
 
-        // Jump Circles: Zıplama ve yere iniş halkalarını üret
         if (jumpCircles) {
             boolean onGround = client.player.isOnGround();
             Vec3d pos = client.player.getPos();
@@ -104,7 +106,6 @@ public class Nexus implements ClientModInitializer {
             activeRings.clear();
         }
 
-        // Crosshair Spin: Oyuncu hitbox'ına yaklaşılınca / nişangah odaklanınca animasyonu büyüt
         if (crosshairSpin) {
             boolean nearPlayerHitbox = isCrosshairNearPlayer(client, 6.0);
             float target = nearPlayerHitbox ? 1.0f : 0.25f;
@@ -149,7 +150,6 @@ public class Nexus implements ClientModInitializer {
         int width = client.getWindow().getScaledWidth();
         int height = client.getWindow().getScaledHeight();
 
-        // Sol üst Axolotl rozet ve durum göstergesi
         if (axolotlBadge) {
             int panelX = 10;
             int panelY = 10;
@@ -164,7 +164,6 @@ public class Nexus implements ClientModInitializer {
             );
         }
 
-        // 4 yönlü dönen Crosshair Spin okları
         if (crosshairSpin && focusProgress > 0.02f) {
             float centerX = width / 2.0f;
             float centerY = height / 2.0f;
@@ -180,7 +179,6 @@ public class Nexus implements ClientModInitializer {
                 matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(i * 90.0f));
                 int color = (i % 2 == 0) ? 0xFFFF77B7 : 0xFF7CF8FF;
 
-                // Ok gövdesi ve iki kanadı
                 context.fill(-1, (int) -radius - 6, 1, (int) -radius, color);
                 context.fill(-3, (int) -radius - 4, 0, (int) -radius - 2, color);
                 context.fill(0, (int) -radius - 4, 3, (int) -radius - 2, color);
@@ -200,12 +198,10 @@ public class Nexus implements ClientModInitializer {
 
         Vec3d cameraPos = context.camera().getPos();
 
-        // 1. Jump Circles dünyadaki genişleyen halkaları
         if (jumpCircles && !activeRings.isEmpty()) {
             renderJumpCircles(matrices, cameraPos);
         }
 
-        // 2. Oyuncu kafasında Santa Hat (Noel Şapkası) kozmetik modeli
         if (santaHat) {
             for (PlayerEntity player : client.world.getPlayers()) {
                 if (player == client.player && client.options.getPerspective().isFirstPerson()) {
@@ -278,11 +274,8 @@ public class Nexus implements ClientModInitializer {
         matrices.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(-player.getYaw()));
         Matrix4f matrix = matrices.peek().getPositionMatrix();
 
-        // Beyaz alt şerit (kürk)
         addBox(buffer, matrix, -0.26f, 0.00f, -0.26f, 0.26f, 0.08f, 0.26f, 248, 250, 255, 235);
-        // Kırmızı şapka gövdesi
         addBox(buffer, matrix, -0.22f, 0.08f, -0.22f, 0.22f, 0.24f, 0.22f, 235, 45, 75, 235);
-        // Eğik uç ve beyaz ponpon
         addBox(buffer, matrix, -0.14f, 0.24f, -0.28f, 0.14f, 0.34f, -0.06f, 235, 45, 75, 235);
         addBox(buffer, matrix, -0.07f, 0.32f, -0.34f, 0.07f, 0.44f, -0.20f, 255, 255, 255, 245);
 
@@ -299,7 +292,6 @@ public class Nexus implements ClientModInitializer {
             float x1, float y1, float z1,
             int r, int g, int b, int a
     ) {
-        // Ön / Arka / Sol / Sağ / Üst yüzeyler
         buffer.vertex(m, x0, y0, z1).color(r, g, b, a);
         buffer.vertex(m, x1, y0, z1).color(r, g, b, a);
         buffer.vertex(m, x1, y1, z1).color(r, g, b, a);
@@ -358,31 +350,34 @@ public class Nexus implements ClientModInitializer {
         }
     }
 
-    // Tüm görsel/kozmetik modüllerin tek ekranda yer aldığı dashboard ekranı
     public static class NexusDashboardScreen extends Screen {
 
         protected NexusDashboardScreen(Text title) {
             super(title);
         }
 
+        private TextRenderer getRenderer() {
+            return MinecraftClient.getInstance().textRenderer;
+        }
+
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
             if (frostedDashboard) {
-                this.renderBackground(context, mouseX, mouseY, delta);
+                super.renderBackground(context, mouseX, mouseY, delta);
             }
 
+            TextRenderer tr = getRenderer();
             int panelW = Math.min(this.width - 40, 440);
             int panelH = Math.min(this.height - 40, 250);
             int left = (this.width - panelW) / 2;
             int top = (this.height - panelH) / 2;
 
-            // Buzlu cam çerçeve ve neon pembe/camgöbeği üst çizgi
             context.fill(left, top, left + panelW, top + panelH, 0xCC121622);
             context.fill(left, top, left + panelW, top + 2, 0xFFFF77B7);
             context.fill(left, top + panelH - 2, left + panelW, top + panelH, 0xFF7CF8FF);
 
             context.drawTextWithShadow(
-                    this.textRenderer,
+                    tr,
                     Text.literal(CLIENT_TITLE + " • TEK EKRAN GÖRSEL PANEL"),
                     left + 14,
                     top + 12,
@@ -393,23 +388,23 @@ public class Nexus implements ClientModInitializer {
             int col2X = left + (panelW / 2) + 8;
             int y = top + 36;
 
-            context.drawTextWithShadow(this.textRenderer, Text.literal("AXOLOTL"), col1X, y, 0xFFFF77B7);
-            context.drawTextWithShadow(this.textRenderer, Text.literal("VISUAL & COSMETIC"), col2X, y, 0xFF7CF8FF);
+            context.drawTextWithShadow(tr, Text.literal("AXOLOTL"), col1X, y, 0xFFFF77B7);
+            context.drawTextWithShadow(tr, Text.literal("VISUAL & COSMETIC"), col2X, y, 0xFF7CF8FF);
             y += 18;
 
-            drawToggleRow(context, col1X, y, "Axolotl Rozeti", axolotlBadge);
-            drawToggleRow(context, col2X, y, "Crosshair Spin (4x)", crosshairSpin);
+            drawToggleRow(context, tr, col1X, y, "Axolotl Rozeti", axolotlBadge);
+            drawToggleRow(context, tr, col2X, y, "Crosshair Spin (4x)", crosshairSpin);
             y += 24;
 
-            drawToggleRow(context, col1X, y, "Axolotl Maskot", axolotlMascot);
-            drawToggleRow(context, col2X, y, "Jump Circles", jumpCircles);
+            drawToggleRow(context, tr, col1X, y, "Axolotl Maskot", axolotlMascot);
+            drawToggleRow(context, tr, col2X, y, "Jump Circles", jumpCircles);
             y += 24;
 
-            drawToggleRow(context, col1X, y, "Frosted Menu", frostedDashboard);
-            drawToggleRow(context, col2X, y, "Santa Hat", santaHat);
+            drawToggleRow(context, tr, col1X, y, "Frosted Menu", frostedDashboard);
+            drawToggleRow(context, tr, col2X, y, "Santa Hat", santaHat);
 
             context.drawTextWithShadow(
-                    this.textRenderer,
+                    tr,
                     Text.literal("Tıklayarak aç/kapat • ESC ile çık"),
                     left + 14,
                     top + panelH - 18,
@@ -419,11 +414,11 @@ public class Nexus implements ClientModInitializer {
             super.render(context, mouseX, mouseY, delta);
         }
 
-        private void drawToggleRow(DrawContext context, int x, int y, String label, boolean enabled) {
+        private void drawToggleRow(DrawContext context, TextRenderer tr, int x, int y, String label, boolean enabled) {
             context.fill(x, y, x + 190, y + 18, 0x99202638);
-            context.drawTextWithShadow(this.textRenderer, Text.literal(label), x + 6, y + 5, 0xFFE6ECF8);
+            context.drawTextWithShadow(tr, Text.literal(label), x + 6, y + 5, 0xFFE6ECF8);
             context.drawTextWithShadow(
-                    this.textRenderer,
+                    tr,
                     Text.literal(enabled ? "[AÇIK]" : "[KAPALI]"),
                     x + 142,
                     y + 5,
