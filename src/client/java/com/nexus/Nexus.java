@@ -1,875 +1,468 @@
-package com.nexus;
+package com.nexus.client;
 
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
-import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
-import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
-import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.client.KeyMapping;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.EditBox;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.input.KeyEvent;
-import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.network.chat.Component;
-import net.minecraft.resources.Identifier;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EquipmentSlot;
-import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
+import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
+import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
+import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.render.*;
+import net.minecraft.client.util.InputUtil;
+import net.minecraft.client.util.math.MatrixStack;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.particle.ParticleTypes;
+import net.minecraft.text.Text;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.RotationAxis;
+import net.minecraft.util.math.Vec3d;
+import org.joml.Matrix4f;
 import org.lwjgl.glfw.GLFW;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
+import java.util.Iterator;
 import java.util.List;
-import java.util.Locale;
-import java.util.Properties;
-import java.util.function.IntConsumer;
-import java.util.function.IntSupplier;
 
 public class Nexus implements ClientModInitializer {
 
-    // ==================== Ozellik listesi ====================
+    public static final String MOD_ID = "nexus";
+    public static final String CLIENT_TITLE = "NEXUS x AXOLOTL";
 
-    static final class Feature {
-        final String tab;
-        final String key;
-        final String name;
-        final String desc;
-        boolean on;
-        int keyCode;
+    // Görsel & Kozmetik Modül Bayrakları
+    public static boolean axolotlBadge = true;
+    public static boolean axolotlMascot = true;
+    public static boolean santaHat = true;
+    public static boolean jumpCircles = true;
+    public static boolean crosshairSpin = true;
+    public static boolean frostedDashboard = true;
 
-        Feature(String tab, String key, String name, String desc, boolean on, int keyCode) {
-            this.tab = tab;
-            this.key = key;
-            this.name = name;
-            this.desc = desc;
-            this.on = on;
-            this.keyCode = keyCode;
-        }
-    }
+    // 1.21.11 KeyBinding / KeyEvent uyumlu menü tuşu
+    public static KeyBinding openDashboardKey;
 
-    static final List<Feature> FEATURES = new ArrayList<>();
+    // Jump Circles aktif halkaları
+    private static final List<JumpRing> activeRings = new ArrayList<>();
+    private static boolean wasOnGround = true;
 
-    static Feature add(String tab, String key, String name, String desc, boolean on, int keyCode) {
-        Feature f = new Feature(tab, key, name, desc, on, keyCode);
-        FEATURES.add(f);
-        return f;
-    }
-
-    // Combat
-    static final Feature HITMARKER = add("Combat", "hitmarker", "Hitmarker", "Vurus aninda carpraz isaret", true, -1);
-    static final Feature SWING_VIS = add("Combat", "swing_vis", "Swing Gosterge", "Saldiri ritmi ve kol animasyon bar", true, -1);
-    static final Feature CRIT_FX = add("Combat", "crit_fx", "Kritik Efekt", "Kritik vurus gorsel vurgusu", true, -1);
-    static final Feature TARGET = add("Combat", "target", "Hedef Paneli", "Rakip can ve mesafe kutusu", true, -1);
-    static final Feature COMBO = add("Combat", "combo", "Vurus Sayaci", "Vurus ve combo sayaci", true, -1);
-    static final Feature CPS = add("Combat", "cps", "CPS Sayaci", "Sol/sag tiklama hizi", true, -1);
-    static final Feature KEYS = add("Combat", "keys", "Keystrokes", "Hareket ve tiklama tuslari", true, -1);
-    static final Feature ARMOR = add("Combat", "armor", "Zirh Durumu", "Zirh parcalari ve dayaniklilik", true, -1);
-
-    // Soup API (Soup PvP HUD ve istatistik)
-    static final Feature SOUP_COUNTER = add("Soup", "soup_counter", "Soup Sayaci", "Envanterdeki corba adedi", true, -1);
-    static final Feature SOUP_USED = add("Soup", "soup_used", "Tuketilen Soup", "Kullanilan corba sayaci", true, -1);
-    static final Feature SOUP_ALERT = add("Soup", "soup_alert", "Soup Uyarisi", "Can az ve corba varken uyari", true, -1);
-
-    // Axolotl Client (Axolotl tema, rozet ve kozmetik)
-    static final Feature AXO_BADGE = add("Axolotl", "axo_badge", "Axolotl Rozeti", "Axolotl client kimlik rozeti", true, GLFW.GLFW_KEY_B);
-    static final Feature AXO_GLOW = add("Axolotl", "axo_glow", "Axolotl Aura", "Yumusak pastel cerceve vurgusu", true, -1);
-    static final Feature AXO_WAVE = add("Axolotl", "axo_wave", "Axolotl Anim", "Canli dalga animasyon cubugu", true, -1);
-
-    // Visual
-    static final Feature SKY_TINT = add("Visual", "sky_tint", "Sky Atmosfer", "Gokyuzu ton filtre katmani", false, -1);
-    static final Feature SHADER_FX = add("Visual", "shader_fx", "Shader Modu", "Sinematik kontrast ve derinlik tonu", false, -1);
-    static final Feature ELYTRA_ANIM = add("Visual", "elytra_anim", "Elytra Animasyon", "Kanat acilma ve akis animasyonu", true, -1);
-    static final Feature CROSS = add("Visual", "cross", "Kirmizi Crosshair", "Hedef uzerinde kirmizi nisangah", true, -1);
-    static final Feature LOWHP = add("Visual", "lowhp", "Dusuk Can Uyari", "Can azalinca kenar uyari cercevesi", true, -1);
-    static final Feature HUD_BOX = add("Visual", "hud_box", "HUD Bilgileri", "FPS, Ping, XYZ, Yon, Hiz, Saat", true, -1);
-
-    // Player
-    static final Feature HAT = add("Player", "hat", "Kozmetik Sapka", "Karakter basinda silindir sapka", true, GLFW.GLFW_KEY_H);
-    static final Feature HALO = add("Player", "halo", "Kozmetik Hale", "Bas uzerinde donen isik halkasi", false, -1);
-    static final Feature WALK_ANIM = add("Player", "walk_anim", "Adim Animasyonu", "Akici yurume ritim gostergesi", true, -1);
-    static final Feature GLIDE_POSE = add("Player", "glide_pose", "Suzulme Pozu", "Havada suzulme durum efekti", true, -1);
-    static final Feature SPRINT = add("Player", "sprint", "Oto Kosu", "Ileri tusunda otomatik kosu", false, -1);
-
-    // Elytra
-    static final Feature ELYTRA_TRAIL = add("Elytra", "elytra_trail", "Kanat Izi", "Elytra ucusunda iz cizgileri", true, GLFW.GLFW_KEY_G);
-    static final Feature ELYTRA_HUD = add("Elytra", "elytra_hud", "Ucus Telemetri", "Yukseklik, hiz ve aci bilgisi", true, -1);
-    static final Feature BOOST_WARN = add("Elytra", "boost_warn", "Alicak Ucus Uyari", "Yere yaklasinca gorsel uyari", true, -1);
-
-    static boolean showWatermark = true;
-
-    static final String[] TABS = {"Combat", "Soup", "Axolotl", "Visual", "Player", "Elytra", "Ayar"};
-
-    // ==================== Konum ve tema ayarlari ====================
-
-    static int wmX = 8, wmY = 8;
-    static int hudX = 8, hudY = 34;
-    static int keysX = 8, keysY = 152;
-    static int armorX = 8, armorY = 212;
-    static int targetX = 8, targetY = 244;
-    static int soupX = 8, soupY = 294;
-    static int colorIdx = 0;
-
-    static final int[] COLORS = {0xFFFF8FAB, 0xFF38BDF8, 0xFF4ADE80, 0xFFFACC15, 0xFFC084FC};
-    static final String[] COLOR_NAMES = {"Axolotl Pembe", "Camgobegi", "Yesil", "Sari", "Mor"};
-
-    // ==================== Durum ====================
-
-    private static KeyMapping openKey;
-    private static final Deque<Long> leftClicks = new ArrayDeque<>();
-    private static final Deque<Long> rightClicks = new ArrayDeque<>();
-    private static boolean wasLeft = false;
-    private static boolean wasRight = false;
-    private static boolean[] prevBoundKeys = new boolean[0];
-
-    private static int hits = 0;
-    private static int combo = 0;
-    private static int soupsConsumed = 0;
-    private static int lastSoupCount = -1;
-    private static LivingEntity lastTarget = null;
-    private static long lastHitMs = 0L;
-    private static long lastSwingMs = 0L;
-    private static long lastCritMs = 0L;
-
-    private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm:ss");
-    private static final String[] DIRS = {
-        "Guney", "Guneybati", "Bati", "Kuzeybati",
-        "Kuzey", "Kuzeydogu", "Dogu", "Guneydogu"
-    };
+    // Crosshair Spin animasyon durumu
+    private static float spinAngle = 0.0f;
+    private static float focusProgress = 0.0f;
 
     @Override
     public void onInitializeClient() {
-        load();
+        openDashboardKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.nexus.dashboard",
+                InputUtil.Type.KEYSYM,
+                GLFW.GLFW_KEY_RIGHT_SHIFT,
+                "category.nexus.visuals"
+        ));
 
-        KeyMapping.Category category = KeyMapping.Category.register(
-            Identifier.fromNamespaceAndPath("nexus", "main"));
-        openKey = KeyBindingHelper.registerKeyBinding(
-            new KeyMapping("key.nexus.menu", GLFW.GLFW_KEY_P, category));
-
-        ClientTickEvents.END_CLIENT_TICK.register(Nexus::tick);
-
-        HudElementRegistry.attachElementAfter(
-            VanillaHudElements.MISC_OVERLAYS,
-            Identifier.fromNamespaceAndPath("nexus", "hud"),
-            (graphics, tickCounter) -> {
-                Minecraft mc = Minecraft.getInstance();
-                if (mc.player == null || mc.level == null || mc.options.hideGui) return;
-                renderAll(graphics, mc);
-            }
-        );
+        ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
+        HudRenderCallback.EVENT.register(this::onHudRender);
+        WorldRenderEvents.AFTER_ENTITIES.register(this::onWorldRender);
     }
 
-    // ==================== Soup API yardimcilari ====================
-
-    private static boolean isSoup(ItemStack stack) {
-        if (stack.isEmpty()) return false;
-        return stack.is(Items.MUSHROOM_STEW)
-            || stack.is(Items.BEETROOT_SOUP)
-            || stack.is(Items.RABBIT_STEW);
-    }
-
-    private static int countSoups(LocalPlayer p) {
-        int total = 0;
-        int size = p.getInventory().getContainerSize();
-        for (int i = 0; i < size; i++) {
-            ItemStack st = p.getInventory().getItem(i);
-            if (isSoup(st)) {
-                total += st.getCount();
-            }
-        }
-        return total;
-    }
-
-    // ==================== Tick ve tus atamalari ====================
-
-    private static void tick(Minecraft mc) {
-        while (openKey.consumeClick()) {
-            mc.setScreen(mc.screen instanceof NexusMenu ? null : new NexusMenu());
-        }
-
-        long window = mc.getWindow().handle();
-        if (prevBoundKeys.length != FEATURES.size()) {
-            prevBoundKeys = new boolean[FEATURES.size()];
-        }
-        if (mc.screen == null) {
-            for (int i = 0; i < FEATURES.size(); i++) {
-                Feature f = FEATURES.get(i);
-                if (f.keyCode > 0) {
-                    boolean down = GLFW.glfwGetKey(window, f.keyCode) == GLFW.GLFW_PRESS;
-                    if (down && !prevBoundKeys[i]) {
-                        f.on = !f.on;
-                        save();
-                    }
-                    prevBoundKeys[i] = down;
-                } else {
-                    prevBoundKeys[i] = false;
-                }
+    private void onClientTick(MinecraftClient client) {
+        while (openDashboardKey.wasPressed()) {
+            if (client.player != null) {
+                client.setScreen(new NexusDashboardScreen(Text.literal(CLIENT_TITLE)));
             }
         }
 
-        LocalPlayer p = mc.player;
-        if (p == null || mc.level == null) return;
-
-        int currentSoups = countSoups(p);
-        if (lastSoupCount >= 0 && currentSoups < lastSoupCount) {
-            soupsConsumed += (lastSoupCount - currentSoups);
-        }
-        lastSoupCount = currentSoups;
-
-        long now = System.currentTimeMillis();
-        boolean left = mc.options.keyAttack.isDown();
-        boolean right = mc.options.keyUse.isDown();
-
-        if (mc.screen == null) {
-            if (left && !wasLeft) {
-                leftClicks.addLast(now);
-                lastSwingMs = now;
-                Entity e = mc.crosshairPickEntity;
-                if (e instanceof LivingEntity le) {
-                    hits++;
-                    combo++;
-                    lastHitMs = now;
-                    lastTarget = le;
-                    if (p.fallDistance > 0.0f && !p.onGround()) {
-                        lastCritMs = now;
-                    }
-                }
-            }
-            if (right && !wasRight) {
-                rightClicks.addLast(now);
-            }
-        }
-        wasLeft = left;
-        wasRight = right;
-
-        if (p.hurtTime > 0) {
-            combo = 0;
-        }
-        if (combo > 0 && now - lastHitMs > 4500L) {
-            combo = 0;
-        }
-
-        if (SPRINT.on && mc.screen == null && mc.options.keyUp.isDown()
-                && !p.isUsingItem() && !p.horizontalCollision
-                && !p.isInWater() && p.getFoodData().getFoodLevel() > 6) {
-            p.setSprinting(true);
-        }
-    }
-
-    private static int cps(Deque<Long> q, long now) {
-        while (!q.isEmpty() && now - q.peekFirst() > 1000L) {
-            q.removeFirst();
-        }
-        return q.size();
-    }
-
-    private static String keyName(int code) {
-        if (code <= 0) return "YOK";
-        String name = GLFW.glfwGetKeyName(code, 0);
-        if (name != null && !name.isBlank()) {
-            return name.toUpperCase(Locale.ROOT);
-        }
-        return switch (code) {
-            case GLFW.GLFW_KEY_SPACE -> "SPACE";
-            case GLFW.GLFW_KEY_LEFT_SHIFT -> "L-SHIFT";
-            case GLFW.GLFW_KEY_LEFT_CONTROL -> "L-CTRL";
-            case GLFW.GLFW_KEY_TAB -> "TAB";
-            case GLFW.GLFW_KEY_ENTER -> "ENTER";
-            default -> "KEY-" + code;
-        };
-    }
-
-    // ==================== Cizim yardimcilari ====================
-
-    private static void border(GuiGraphics g, int x, int y, int w, int h, int c) {
-        g.fill(x, y, x + w, y + 1, c);
-        g.fill(x, y + h - 1, x + w, y + h, c);
-        g.fill(x, y, x + 1, y + h, c);
-        g.fill(x + w - 1, y, x + w, y + h, c);
-    }
-
-    private static void panel(GuiGraphics g, int x, int y, int w, int h, int bg, int bd) {
-        g.fill(x, y, x + w, y + h, bg);
-        border(g, x, y, w, h, bd);
-    }
-
-    private static void keyBox(GuiGraphics g, Minecraft mc, int x, int y,
-                               int w, int h, String label, boolean pressed) {
-        g.fill(x, y, x + w, y + h, pressed ? 0xDD38BDF8 : 0x99111827);
-        border(g, x, y, w, h, pressed ? 0xFFE0F2FE : 0xFF334155);
-        int tx = x + (w - mc.font.width(label)) / 2;
-        int ty = y + (h - 7) / 2;
-        g.drawString(mc.font, label, tx, ty, pressed ? 0xFF090D16 : 0xFFF8FAFC, false);
-    }
-
-    private static void renderAll(GuiGraphics g, Minecraft mc) {
-        LocalPlayer p = mc.player;
-        long now = System.currentTimeMillis();
-        int sw = g.guiWidth();
-        int sh = g.guiHeight();
-        int accent = COLORS[colorIdx];
-
-        if (SKY_TINT.on) {
-            g.fill(0, 0, sw, sh / 3, 0x1838BDF8);
-        }
-        if (SHADER_FX.on) {
-            g.fill(0, 0, sw, sh, 0x14090D16);
-            border(g, 0, 0, sw, sh, 0x26C084FC);
-        }
-        if (AXO_GLOW.on) {
-            border(g, 1, 1, sw - 2, sh - 2, 0x33FF8FAB);
-        }
-        if (LOWHP.on && p.getHealth() <= 6.0f && p.isAlive()) {
-            int t = 6;
-            int c = 0x55EF4444;
-            g.fill(0, 0, sw, t, c);
-            g.fill(0, sh - t, sw, sh, c);
-            g.fill(0, 0, t, sh, c);
-            g.fill(sw - t, 0, sw, sh, c);
-        }
-
-        if (showWatermark) {
-            String wm = AXO_BADGE.on ? "NEXUS x AXOLOTL" : "NEXUS CLIENT";
-            int ww = mc.font.width(wm) + 14;
-            int wh = 18;
-            panel(g, wmX, wmY, ww, wh, 0xB80B101B, accent);
-            g.fill(wmX, wmY, wmX + 3, wmY + wh, accent);
-            g.drawString(mc.font, wm, wmX + 8, wmY + 5, accent, true);
-        }
-
-        List<String> lines = new ArrayList<>();
-        if (HUD_BOX.on) {
-            lines.add("FPS: " + mc.getFps());
-            int ping = 0;
-            var conn = mc.getConnection();
-            if (conn != null) {
-                var info = conn.getPlayerInfo(p.getUUID());
-                if (info != null) ping = info.getLatency();
-            }
-            lines.add("Ping: " + ping + " ms");
-            lines.add("XYZ: " + p.getBlockX() + " " + p.getBlockY() + " " + p.getBlockZ());
-
-            float yaw = ((p.getYRot() % 360f) + 360f) % 360f;
-            int idx = ((int) ((yaw + 22.5f) / 45f)) % 8;
-            lines.add("Yon: " + DIRS[idx]);
-
-            double dx = p.getX() - p.xo;
-            double dz = p.getZ() - p.zo;
-            lines.add(String.format(Locale.ROOT, "Hiz: %.1f b/s", Math.sqrt(dx * dx + dz * dz) * 20.0));
-            lines.add("Saat: " + LocalTime.now().format(TIME_FMT));
-        }
-        if (CPS.on) {
-            lines.add("CPS: " + cps(leftClicks, now) + " | " + cps(rightClicks, now));
-        }
-        if (COMBO.on) {
-            lines.add("Vurus: " + hits + "  Combo: " + combo);
-        }
-
-        if (!lines.isEmpty()) {
-            int maxW = 0;
-            for (String s : lines) maxW = Math.max(maxW, mc.font.width(s));
-            int w = maxW + 12;
-            int h = lines.size() * 11 + 8;
-            panel(g, hudX, hudY, w, h, 0xA80B101B, 0xFF1E293B);
-            for (int i = 0; i < lines.size(); i++) {
-                g.drawString(mc.font, lines.get(i), hudX + 6, hudY + 5 + i * 11, accent, true);
-            }
-        }
-
-        // ---- Soup API HUD ----
-        List<String> soupLines = new ArrayList<>();
-        if (SOUP_COUNTER.on) {
-            soupLines.add("Soup: " + countSoups(p));
-        }
-        if (SOUP_USED.on) {
-            soupLines.add("Icilen Soup: " + soupsConsumed);
-        }
-        if (!soupLines.isEmpty()) {
-            int maxW = 0;
-            for (String s : soupLines) maxW = Math.max(maxW, mc.font.width(s));
-            int w = maxW + 12;
-            int h = soupLines.size() * 11 + 8;
-            panel(g, soupX, soupY, w, h, 0xA80B101B, 0xFFFF8FAB);
-            for (int i = 0; i < soupLines.size(); i++) {
-                g.drawString(mc.font, soupLines.get(i), soupX + 6, soupY + 5 + i * 11, 0xFFFFC2D1, true);
-            }
-        }
-
-        int cx = sw / 2;
-        int cy = sh / 2;
-
-        if (SOUP_ALERT.on && p.getHealth() <= 10.0f && countSoups(p) > 0 && p.isAlive()) {
-            String alert = "SOUP HAZIR (" + countSoups(p) + ")";
-            int aw = mc.font.width(alert) + 12;
-            g.fill(cx - aw / 2, cy + 26, cx + aw / 2, cy + 40, 0xBB831843);
-            g.drawString(mc.font, alert, cx - aw / 2 + 6, cy + 29, 0xFFFDF2F8, true);
-        }
-
-        Entity looked = mc.crosshairPickEntity;
-        if (CROSS.on && looked instanceof LivingEntity && mc.screen == null) {
-            g.fill(cx - 6, cy - 1, cx + 7, cy + 1, 0xFFFF2020);
-            g.fill(cx - 1, cy - 6, cx + 1, cy + 7, 0xFFFF2020);
-        }
-        if (HITMARKER.on && now - lastHitMs < 220L) {
-            int hmColor = (CRIT_FX.on && now - lastCritMs < 220L) ? 0xFFFACC15 : 0xFFF8FAFC;
-            for (int d = 3; d <= 6; d++) {
-                g.fill(cx - d, cy - d, cx - d + 1, cy - d + 2, hmColor);
-                g.fill(cx + d, cy - d, cx + d + 1, cy - d + 2, hmColor);
-                g.fill(cx - d, cy + d, cx - d + 1, cy + d + 2, hmColor);
-                g.fill(cx + d, cy + d, cx + d + 1, cy + d + 2, hmColor);
-            }
-        }
-        if (SWING_VIS.on && now - lastSwingMs < 400L) {
-            float prog = 1.0f - ((now - lastSwingMs) / 400.0f);
-            int bw = 40;
-            int bx = cx - bw / 2;
-            int by = cy + 14;
-            g.fill(bx, by, bx + bw, by + 3, 0x881E293B);
-            g.fill(bx, by, bx + Math.round(bw * prog), by + 3, accent);
-        }
-
-        LivingEntity target = null;
-        if (looked instanceof LivingEntity le) {
-            target = le;
-        } else if (lastTarget != null && lastTarget.isAlive() && now - lastHitMs < 3500L) {
-            target = lastTarget;
-        }
-        if (TARGET.on && target != null) {
-            int tw = 148;
-            int th = 44;
-            panel(g, targetX, targetY, tw, th, 0xB80B101B, 0xFFEF4444);
-
-            float hp = Math.max(0f, target.getHealth());
-            float maxHp = Math.max(1f, target.getMaxHealth());
-            float ratio = Math.max(0f, Math.min(1f, hp / maxHp));
-
-            g.drawString(mc.font, target.getName().getString(),
-                targetX + 7, targetY + 6, 0xFFF8FAFC, true);
-            g.drawString(mc.font,
-                String.format(Locale.ROOT, "%.1f HP - %.1fm", hp, target.distanceTo(p)),
-                targetX + 7, targetY + 18, 0xFFCBD5E1, false);
-
-            int bx = targetX + 7;
-            int by = targetY + 31;
-            int bw = tw - 14;
-            g.fill(bx, by, bx + bw, by + 6, 0xFF1F2937);
-            g.fill(bx, by, bx + Math.round(bw * ratio), by + 6, 0xFF22C55E);
-        }
-
-        if (ARMOR.on) {
-            int aw = 96;
-            int ah = 26;
-            panel(g, armorX, armorY, aw, ah, 0xA80B101B, 0xFF1E293B);
-
-            EquipmentSlot[] slots = {
-                EquipmentSlot.HEAD, EquipmentSlot.CHEST,
-                EquipmentSlot.LEGS, EquipmentSlot.FEET
-            };
-            for (int i = 0; i < slots.length; i++) {
-                ItemStack st = p.getItemBySlot(slots[i]);
-                if (st.isEmpty()) continue;
-                int ix = armorX + 5 + i * 22;
-                int iy = armorY + 4;
-                g.renderItem(st, ix, iy);
-                if (st.isDamageableItem()) {
-                    int max = st.getMaxDamage();
-                    int pct = Math.round(((max - st.getDamageValue()) / (float) max) * 100f);
-                    g.drawString(mc.font, pct + "%", ix, iy + 15,
-                        pct > 25 ? 0xFF94A3B8 : 0xFFEF4444, false);
-                }
-            }
-        }
-
-        if (KEYS.on) {
-            int kw = 76;
-            int kh = 52;
-            panel(g, keysX, keysY, kw, kh, 0x990B101B, 0xFF1E293B);
-
-            keyBox(g, mc, keysX + 28, keysY + 4, 20, 14, "W", mc.options.keyUp.isDown());
-            keyBox(g, mc, keysX + 6, keysY + 20, 20, 14, "A", mc.options.keyLeft.isDown());
-            keyBox(g, mc, keysX + 28, keysY + 20, 20, 14, "S", mc.options.keyDown.isDown());
-            keyBox(g, mc, keysX + 50, keysY + 20, 20, 14, "D", mc.options.keyRight.isDown());
-            keyBox(g, mc, keysX + 6, keysY + 36, 31, 12, "LMB", mc.options.keyAttack.isDown());
-            keyBox(g, mc, keysX + 39, keysY + 36, 31, 12, "RMB", mc.options.keyUse.isDown());
-        }
-
-        List<String> playerTags = new ArrayList<>();
-        if (AXO_BADGE.on) playerTags.add("Axolotl[" + keyName(AXO_BADGE.keyCode) + "]");
-        if (HAT.on) playerTags.add("Sapka[" + keyName(HAT.keyCode) + "]");
-        if (HALO.on) playerTags.add("Hale");
-        if (WALK_ANIM.on && p.walkAnimation.speed() > 0.05f) {
-            int phase = (int) ((now / 120L) % 4L);
-            String[] frames = {"|", "/", "-", "\\"};
-            playerTags.add("Adim " + frames[phase]);
-        }
-        if (GLIDE_POSE.on && p.isFallFlying()) {
-            playerTags.add("Suzulme Pozu");
-        }
-        if (SPRINT.on && p.isSprinting()) {
-            playerTags.add("Oto Kosu");
-        }
-        if (!playerTags.isEmpty()) {
-            String pLine = String.join("  ", playerTags);
-            int pw = mc.font.width(pLine) + 12;
-            int px = sw - pw - 8;
-            int py = 8;
-            panel(g, px, py, pw, 18, 0xA80B101B, 0xFF1E293B);
-            g.drawString(mc.font, pLine, px + 6, py + 5, 0xFFE2E8F0, false);
-
-            if (AXO_WAVE.on) {
-                int waveW = (int) ((Math.sin(now / 180.0) * 0.5 + 0.5) * (pw - 4));
-                g.fill(px + 2, py + 16, px + 2 + Math.max(4, waveW), py + 17, accent);
-            }
-        }
-
-        if (p.isFallFlying()) {
-            if (ELYTRA_ANIM.on) {
-                double wave = Math.sin(now / 110.0) * 18.0;
-                int wingSpan = 48;
-                int wy = cy + 24 + (int) Math.round(wave * 0.25);
-                g.fill(cx - wingSpan, wy, cx - 10, wy + 2, accent);
-                g.fill(cx + 10, wy, cx + wingSpan, wy + 2, accent);
-            }
-            if (ELYTRA_TRAIL.on) {
-                for (int i = 1; i <= 4; i++) {
-                    int offset = i * 9;
-                    g.fill(cx - 24 - offset, cy + 28 + offset / 2,
-                        cx - 20 - offset, cy + 30 + offset / 2, 0x6638BDF8);
-                    g.fill(cx + 20 + offset, cy + 28 + offset / 2,
-                        cx + 24 + offset, cy + 30 + offset / 2, 0x6638BDF8);
-                }
-            }
-            if (ELYTRA_HUD.on) {
-                double spd = p.getDeltaMovement().length() * 20.0;
-                String eInfo = String.format(Locale.ROOT, "Elytra: %.1f b/s | Y:%.0f", spd, p.getY());
-                int ew = mc.font.width(eInfo) + 12;
-                int ex = (sw - ew) / 2;
-                int ey = sh - 54;
-                panel(g, ex, ey, ew, 18, 0xB80B101B, accent);
-                g.drawString(mc.font, eInfo, ex + 6, ey + 5, 0xFFF8FAFC, false);
-            }
-            if (BOOST_WARN.on && p.getDeltaMovement().y < -0.55) {
-                String warn = "DIKKAT: HIZLI INIS";
-                int w2 = mc.font.width(warn) + 12;
-                g.fill((sw - w2) / 2, cy - 28, (sw + w2) / 2, cy - 12, 0xCC991B1B);
-                g.drawString(mc.font, warn, (sw - w2) / 2 + 6, cy - 24, 0xFFFFFFFF, true);
-            }
-        }
-    }
-
-    // ==================== Kayit / yukleme ====================
-
-    private static Path configPath() {
-        return FabricLoader.getInstance().getConfigDir().resolve("nexus.properties");
-    }
-
-    static void save() {
-        Properties p = new Properties();
-        for (Feature f : FEATURES) {
-            p.setProperty("f." + f.key, String.valueOf(f.on));
-            p.setProperty("k." + f.key, String.valueOf(f.keyCode));
-        }
-        p.setProperty("watermark.on", String.valueOf(showWatermark));
-        p.setProperty("wm.x", String.valueOf(wmX));
-        p.setProperty("wm.y", String.valueOf(wmY));
-        p.setProperty("hud.x", String.valueOf(hudX));
-        p.setProperty("hud.y", String.valueOf(hudY));
-        p.setProperty("keys.x", String.valueOf(keysX));
-        p.setProperty("keys.y", String.valueOf(keysY));
-        p.setProperty("armor.x", String.valueOf(armorX));
-        p.setProperty("armor.y", String.valueOf(armorY));
-        p.setProperty("target.x", String.valueOf(targetX));
-        p.setProperty("target.y", String.valueOf(targetY));
-        p.setProperty("soup.x", String.valueOf(soupX));
-        p.setProperty("soup.y", String.valueOf(soupY));
-        p.setProperty("color", String.valueOf(colorIdx));
-        try (OutputStream out = Files.newOutputStream(configPath())) {
-            p.store(out, "Nexus Axolotl Soup Client");
-        } catch (IOException e) {
-            System.err.println("[Nexus] Kaydedilemedi: " + e.getMessage());
-        }
-    }
-
-    static void load() {
-        Path path = configPath();
-        if (!Files.exists(path)) return;
-        Properties p = new Properties();
-        try (InputStream in = Files.newInputStream(path)) {
-            p.load(in);
-        } catch (IOException e) {
-            System.err.println("[Nexus] Okunamadi: " + e.getMessage());
+        if (client.player == null || client.world == null) {
             return;
         }
-        try {
-            for (Feature f : FEATURES) {
-                f.on = Boolean.parseBoolean(p.getProperty("f." + f.key, String.valueOf(f.on)));
-                f.keyCode = Integer.parseInt(p.getProperty("k." + f.key, String.valueOf(f.keyCode)));
+
+        // Jump Circles: Zıplama ve yere iniş halkalarını üret
+        if (jumpCircles) {
+            boolean onGround = client.player.isOnGround();
+            Vec3d pos = client.player.getPos();
+
+            if (wasOnGround && !onGround && client.player.getVelocity().y > 0.05) {
+                activeRings.add(new JumpRing(pos.x, pos.y + 0.05, pos.z, 0.25f, 1.35f, 18));
+                spawnAxolotlParticles(client, pos.x, pos.y + 0.1, pos.z, 10);
+            } else if (!wasOnGround && onGround) {
+                activeRings.add(new JumpRing(pos.x, pos.y + 0.05, pos.z, 0.20f, 1.60f, 22));
+                spawnAxolotlParticles(client, pos.x, pos.y + 0.1, pos.z, 14);
             }
-            showWatermark = Boolean.parseBoolean(p.getProperty("watermark.on", "true"));
-            wmX = Integer.parseInt(p.getProperty("wm.x", String.valueOf(wmX)));
-            wmY = Integer.parseInt(p.getProperty("wm.y", String.valueOf(wmY)));
-            hudX = Integer.parseInt(p.getProperty("hud.x", String.valueOf(hudX)));
-            hudY = Integer.parseInt(p.getProperty("hud.y", String.valueOf(hudY)));
-            keysX = Integer.parseInt(p.getProperty("keys.x", String.valueOf(keysX)));
-            keysY = Integer.parseInt(p.getProperty("keys.y", String.valueOf(keysY)));
-            armorX = Integer.parseInt(p.getProperty("armor.x", String.valueOf(armorX)));
-            armorY = Integer.parseInt(p.getProperty("armor.y", String.valueOf(armorY)));
-            targetX = Integer.parseInt(p.getProperty("target.x", String.valueOf(targetX)));
-            targetY = Integer.parseInt(p.getProperty("target.y", String.valueOf(targetY)));
-            soupX = Integer.parseInt(p.getProperty("soup.x", String.valueOf(soupX)));
-            soupY = Integer.parseInt(p.getProperty("soup.y", String.valueOf(soupY)));
-            colorIdx = Math.floorMod(Integer.parseInt(p.getProperty("color", "0")), COLORS.length);
-        } catch (NumberFormatException ignored) {
+
+            wasOnGround = onGround;
+
+            Iterator<JumpRing> iterator = activeRings.iterator();
+            while (iterator.hasNext()) {
+                JumpRing ring = iterator.next();
+                ring.tick();
+                if (ring.isExpired()) {
+                    iterator.remove();
+                }
+            }
+        } else {
+            activeRings.clear();
+        }
+
+        // Crosshair Spin: Oyuncu hitbox'ına yaklaşılınca / nişangah odaklanınca animasyonu büyüt
+        if (crosshairSpin) {
+            boolean nearPlayerHitbox = isCrosshairNearPlayer(client, 6.0);
+            float target = nearPlayerHitbox ? 1.0f : 0.25f;
+            focusProgress = MathHelper.lerp(0.22f, focusProgress, target);
+            spinAngle = (spinAngle + (nearPlayerHitbox ? 6.5f : 2.0f)) % 360.0f;
+        } else {
+            focusProgress = 0.0f;
         }
     }
 
-    static void resetPositions() {
-        wmX = 8; wmY = 8;
-        hudX = 8; hudY = 34;
-        keysX = 8; keysY = 152;
-        armorX = 8; armorY = 212;
-        targetX = 8; targetY = 244;
-        soupX = 8; soupY = 294;
-        save();
+    private void spawnAxolotlParticles(MinecraftClient client, double x, double y, double z, int count) {
+        if (client.world == null) return;
+        for (int i = 0; i < count; i++) {
+            double angle = (Math.PI * 2 * i) / count;
+            double vx = Math.cos(angle) * 0.04;
+            double vz = Math.sin(angle) * 0.04;
+            client.world.addParticle(ParticleTypes.END_ROD, x, y, z, vx, 0.02, vz);
+        }
     }
 
-    // ==================== Menu ====================
+    private boolean isCrosshairNearPlayer(MinecraftClient client, double maxDistance) {
+        if (client.player == null || client.world == null) return false;
 
-    public static class NexusMenu extends Screen {
+        Vec3d eyePos = client.player.getCameraPosVec(1.0f);
+        Vec3d lookVec = client.player.getRotationVec(1.0f);
+        Vec3d reachEnd = eyePos.add(lookVec.multiply(maxDistance));
 
-        private static int tab = 0;
-        private static String searchQuery = "";
-        private static Feature listeningFeature = null;
-
-        private EditBox searchBox;
-
-        public NexusMenu() {
-            super(Component.literal("Nexus Axolotl Client"));
-        }
-
-        @Override
-        public boolean isPauseScreen() {
-            return false;
-        }
-
-        @Override
-        protected void init() {
-            listeningFeature = null;
-
-            int panelW = 430;
-            int panelH = 244;
-            int px = (width - panelW) / 2;
-            int py = (height - panelH) / 2;
-
-            for (int i = 0; i < TABS.length; i++) {
-                final int idx = i;
-                boolean selected = (i == tab);
-                String tLabel = (selected ? "> " : "  ") + TABS[i];
-                addRenderableWidget(Button.builder(Component.literal(tLabel), b -> {
-                    tab = idx;
-                    rebuildWidgets();
-                }).bounds(px + 10, py + 32 + i * 26, 98, 22).build());
-            }
-
-            if (!TABS[tab].equals("Ayar")) {
-                searchBox = new EditBox(font, px + 118, py + 32, panelW - 128, 18,
-                    Component.literal("Ara..."));
-                searchBox.setMaxLength(32);
-                searchBox.setValue(searchQuery);
-                searchBox.setResponder(val -> {
-                    searchQuery = val;
-                    rebuildModuleButtons(px + 118, py + 56, panelW - 128);
-                });
-                addRenderableWidget(searchBox);
-                rebuildModuleButtons(px + 118, py + 56, panelW - 128);
-            } else {
-                searchBox = null;
-                buildSettings(px + 118, py + 32);
-            }
-        }
-
-        private void rebuildModuleButtons(int startX, int startY, int areaW) {
-            clearWidgets();
-
-            int panelW = 430;
-            int panelH = 244;
-            int px = (width - panelW) / 2;
-            int py = (height - panelH) / 2;
-
-            for (int i = 0; i < TABS.length; i++) {
-                final int idx = i;
-                boolean selected = (i == tab);
-                String tLabel = (selected ? "> " : "  ") + TABS[i];
-                addRenderableWidget(Button.builder(Component.literal(tLabel), b -> {
-                    tab = idx;
-                    rebuildWidgets();
-                }).bounds(px + 10, py + 32 + i * 26, 98, 22).build());
-            }
-
-            searchBox = new EditBox(font, px + 118, py + 32, panelW - 128, 18,
-                Component.literal("Ara..."));
-            searchBox.setMaxLength(32);
-            searchBox.setValue(searchQuery);
-            searchBox.setResponder(val -> {
-                if (!val.equals(searchQuery)) {
-                    searchQuery = val;
-                    rebuildModuleButtons(startX, startY, areaW);
-                }
-            });
-            addRenderableWidget(searchBox);
-
-            String q = searchQuery.trim().toLowerCase(Locale.ROOT);
-            List<Feature> matching = new ArrayList<>();
-            for (Feature f : FEATURES) {
-                boolean tabMatch = q.isEmpty() && f.tab.equals(TABS[tab]);
-                boolean searchMatch = !q.isEmpty() && (
-                    f.name.toLowerCase(Locale.ROOT).contains(q)
-                        || f.desc.toLowerCase(Locale.ROOT).contains(q)
-                        || f.tab.toLowerCase(Locale.ROOT).contains(q)
-                );
-                if (tabMatch || searchMatch) {
-                    matching.add(f);
-                }
-            }
-
-            int rowH = 24;
-            int maxRows = 7;
-            for (int i = 0; i < Math.min(matching.size(), maxRows); i++) {
-                Feature f = matching.get(i);
-                int by = startY + i * rowH;
-
-                String toggleText = f.name + ": " + (f.on ? "ACIK" : "KAPALI");
-                addRenderableWidget(Button.builder(Component.literal(toggleText), b -> {
-                    f.on = !f.on;
-                    save();
-                    rebuildModuleButtons(startX, startY, areaW);
-                }).bounds(startX, by, areaW - 78, 20).build());
-
-                String bindText = (listeningFeature == f) ? "[TUS BAS]" : "[" + keyName(f.keyCode) + "]";
-                addRenderableWidget(Button.builder(Component.literal(bindText), b -> {
-                    listeningFeature = (listeningFeature == f) ? null : f;
-                    rebuildModuleButtons(startX, startY, areaW);
-                }).bounds(startX + areaW - 74, by, 74, 20).build());
-            }
-        }
-
-        private void buildSettings(int x, int y) {
-            addRenderableWidget(Button.builder(
-                Component.literal("Watermark: " + (showWatermark ? "ACIK" : "KAPALI")), b -> {
-                    showWatermark = !showWatermark;
-                    save();
-                    rebuildWidgets();
-                }).bounds(x, y, 148, 20).build());
-
-            addRenderableWidget(Button.builder(
-                Component.literal("Tema: " + COLOR_NAMES[colorIdx]), b -> {
-                    colorIdx = (colorIdx + 1) % COLORS.length;
-                    save();
-                    rebuildWidgets();
-                }).bounds(x + 152, y, 148, 20).build());
-
-            y += 24;
-            mover(x, y, "Watermark", () -> wmX, v -> wmX = v, () -> wmY, v -> wmY = v);
-            y += 22;
-            mover(x, y, "HUD", () -> hudX, v -> hudX = v, () -> hudY, v -> hudY = v);
-            y += 22;
-            mover(x, y, "Keystrokes", () -> keysX, v -> keysX = v, () -> keysY, v -> keysY = v);
-            y += 22;
-            mover(x, y, "Zirh", () -> armorX, v -> armorX = v, () -> armorY, v -> armorY = v);
-            y += 22;
-            mover(x, y, "Hedef", () -> targetX, v -> targetX = v, () -> targetY, v -> targetY = v);
-            y += 22;
-            mover(x, y, "Soup", () -> soupX, v -> soupX = v, () -> soupY, v -> soupY = v);
-            y += 26;
-
-            addRenderableWidget(Button.builder(Component.literal("Konumlari Sifirla"), b -> {
-                resetPositions();
-                rebuildWidgets();
-            }).bounds(x, y, 148, 20).build());
-        }
-
-        private void mover(int x, int y, String label,
-                           IntSupplier gx, IntConsumer sx, IntSupplier gy, IntConsumer sy) {
-            String coordText = label + " (" + gx.getAsInt() + "," + gy.getAsInt() + ")";
-            Button name = Button.builder(Component.literal(coordText), b -> { })
-                .bounds(x, y, 166, 20).build();
-            name.active = false;
-            addRenderableWidget(name);
-
-            addRenderableWidget(Button.builder(Component.literal("<"), b -> {
-                sx.accept(Math.max(0, gx.getAsInt() - 8));
-                save();
-                rebuildWidgets();
-            }).bounds(x + 170, y, 28, 20).build());
-
-            addRenderableWidget(Button.builder(Component.literal(">"), b -> {
-                sx.accept(Math.min(width - 20, gx.getAsInt() + 8));
-                save();
-                rebuildWidgets();
-            }).bounds(x + 201, y, 28, 20).build());
-
-            addRenderableWidget(Button.builder(Component.literal("^"), b -> {
-                sy.accept(Math.max(0, gy.getAsInt() - 8));
-                save();
-                rebuildWidgets();
-            }).bounds(x + 232, y, 28, 20).build());
-
-            addRenderableWidget(Button.builder(Component.literal("v"), b -> {
-                sy.accept(Math.min(height - 20, gy.getAsInt() + 8));
-                save();
-                rebuildWidgets();
-            }).bounds(x + 263, y, 28, 20).build());
-        }
-
-        @Override
-        public boolean keyPressed(KeyEvent event) {
-            int keyCode = event.key();
-            if (listeningFeature != null) {
-                if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
-                    listeningFeature.keyCode = -1;
-                } else {
-                    listeningFeature.keyCode = keyCode;
-                }
-                listeningFeature = null;
-                save();
-                rebuildWidgets();
+        for (PlayerEntity other : client.world.getPlayers()) {
+            if (other == client.player || !other.isAlive()) continue;
+            Box expandedBox = other.getBoundingBox().expand(0.35);
+            if (expandedBox.raycast(eyePos, reachEnd).isPresent()) {
                 return true;
             }
-            return super.keyPressed(event);
+        }
+        return false;
+    }
+
+    private void onHudRender(DrawContext context, RenderTickCounter tickCounter) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.player == null || client.options.hudHidden) return;
+
+        int width = client.getWindow().getScaledWidth();
+        int height = client.getWindow().getScaledHeight();
+
+        // Sol üst Axolotl rozet ve durum göstergesi
+        if (axolotlBadge) {
+            int panelX = 10;
+            int panelY = 10;
+            context.fill(panelX, panelY, panelX + 156, panelY + 24, 0x99181C28);
+            context.fill(panelX, panelY, panelX + 156, panelY + 2, 0xFFFF77B7);
+            context.drawTextWithShadow(
+                    client.textRenderer,
+                    Text.literal("✦ " + CLIENT_TITLE),
+                    panelX + 8,
+                    panelY + 8,
+                    0xFF8CF7FF
+            );
+        }
+
+        // 4 yönlü dönen Crosshair Spin okları
+        if (crosshairSpin && focusProgress > 0.02f) {
+            float centerX = width / 2.0f;
+            float centerY = height / 2.0f;
+            float radius = MathHelper.lerp(focusProgress, 18.0f, 11.0f);
+
+            MatrixStack matrices = context.getMatrices();
+            matrices.push();
+            matrices.translate(centerX, centerY, 0);
+            matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(spinAngle));
+
+            for (int i = 0; i < 4; i++) {
+                matrices.push();
+                matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(i * 90.0f));
+                int color = (i % 2 == 0) ? 0xFFFF77B7 : 0xFF7CF8FF;
+
+                // Ok gövdesi ve iki kanadı
+                context.fill(-1, (int) -radius - 6, 1, (int) -radius, color);
+                context.fill(-3, (int) -radius - 4, 0, (int) -radius - 2, color);
+                context.fill(0, (int) -radius - 4, 3, (int) -radius - 2, color);
+                matrices.pop();
+            }
+
+            matrices.pop();
+        }
+    }
+
+    private void onWorldRender(WorldRenderContext context) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.world == null || client.player == null) return;
+
+        MatrixStack matrices = context.matrixStack();
+        if (matrices == null) return;
+
+        Vec3d cameraPos = context.camera().getPos();
+
+        // 1. Jump Circles dünyadaki genişleyen halkaları
+        if (jumpCircles && !activeRings.isEmpty()) {
+            renderJumpCircles(matrices, cameraPos);
+        }
+
+        // 2. Oyuncu kafasında Santa Hat (Noel Şapkası) kozmetik modeli
+        if (santaHat) {
+            for (PlayerEntity player : client.world.getPlayers()) {
+                if (player == client.player && client.options.getPerspective().isFirstPerson()) {
+                    continue;
+                }
+                renderSantaHatAbovePlayer(matrices, cameraPos, player);
+            }
+        }
+    }
+
+    private void renderJumpCircles(MatrixStack matrices, Vec3d cameraPos) {
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        RenderSystem.disableCull();
+
+        Tessellator tessellator = Tessellator.getInstance();
+        BufferBuilder buffer = tessellator.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
+
+        matrices.push();
+        matrices.translate(-cameraPos.x, -cameraPos.y, -cameraPos.z);
+        Matrix4f matrix = matrices.peek().getPositionMatrix();
+
+        int segments = 36;
+        for (JumpRing ring : activeRings) {
+            float alpha = ring.getAlpha();
+            int a = (int) (alpha * 255.0f) & 0xFF;
+
+            for (int i = 0; i < segments; i++) {
+                double a1 = (Math.PI * 2.0 * i) / segments;
+                double a2 = (Math.PI * 2.0 * (i + 1)) / segments;
+
+                float x1 = (float) (ring.x + Math.cos(a1) * ring.currentRadius);
+                float z1 = (float) (ring.z + Math.sin(a1) * ring.currentRadius);
+                float x2 = (float) (ring.x + Math.cos(a2) * ring.currentRadius);
+                float z2 = (float) (ring.z + Math.sin(a2) * ring.currentRadius);
+
+                int r = (i % 2 == 0) ? 255 : 124;
+                int g = (i % 2 == 0) ? 119 : 248;
+                int b = (i % 2 == 0) ? 183 : 255;
+
+                buffer.vertex(matrix, x1, (float) ring.y, z1).color(r, g, b, a);
+                buffer.vertex(matrix, x2, (float) ring.y, z2).color(r, g, b, a);
+            }
+        }
+
+        BufferRenderer.drawWithGlobalProgram(buffer.end());
+        matrices.pop();
+
+        RenderSystem.enableCull();
+        RenderSystem.disableBlend();
+    }
+
+    private void renderSantaHatAbovePlayer(MatrixStack matrices, Vec3d cameraPos, PlayerEntity player) {
+        double px = MathHelper.lerp(0.5, player.prevX, player.getX());
+        double py = MathHelper.lerp(0.5, player.prevY, player.getY());
+        double pz = MathHelper.lerp(0.5, player.prevZ, player.getZ());
+
+        float headY = (float) (py + player.getEyeHeight(player.getPose()) + 0.14 - cameraPos.y);
+        float relX = (float) (px - cameraPos.x);
+        float relZ = (float) (pz - cameraPos.z);
+
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+
+        Tessellator tessellator = Tessellator.getInstance();
+        BufferBuilder buffer = tessellator.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
+
+        matrices.push();
+        matrices.translate(relX, headY, relZ);
+        matrices.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(-player.getYaw()));
+        Matrix4f matrix = matrices.peek().getPositionMatrix();
+
+        // Beyaz alt şerit (kürk)
+        addBox(buffer, matrix, -0.26f, 0.00f, -0.26f, 0.26f, 0.08f, 0.26f, 248, 250, 255, 235);
+        // Kırmızı şapka gövdesi
+        addBox(buffer, matrix, -0.22f, 0.08f, -0.22f, 0.22f, 0.24f, 0.22f, 235, 45, 75, 235);
+        // Eğik uç ve beyaz ponpon
+        addBox(buffer, matrix, -0.14f, 0.24f, -0.28f, 0.14f, 0.34f, -0.06f, 235, 45, 75, 235);
+        addBox(buffer, matrix, -0.07f, 0.32f, -0.34f, 0.07f, 0.44f, -0.20f, 255, 255, 255, 245);
+
+        BufferRenderer.drawWithGlobalProgram(buffer.end());
+        matrices.pop();
+
+        RenderSystem.disableBlend();
+    }
+
+    private static void addBox(
+            BufferBuilder buffer,
+            Matrix4f m,
+            float x0, float y0, float z0,
+            float x1, float y1, float z1,
+            int r, int g, int b, int a
+    ) {
+        // Ön / Arka / Sol / Sağ / Üst yüzeyler
+        buffer.vertex(m, x0, y0, z1).color(r, g, b, a);
+        buffer.vertex(m, x1, y0, z1).color(r, g, b, a);
+        buffer.vertex(m, x1, y1, z1).color(r, g, b, a);
+        buffer.vertex(m, x0, y1, z1).color(r, g, b, a);
+
+        buffer.vertex(m, x1, y0, z0).color(r, g, b, a);
+        buffer.vertex(m, x0, y0, z0).color(r, g, b, a);
+        buffer.vertex(m, x0, y1, z0).color(r, g, b, a);
+        buffer.vertex(m, x1, y1, z0).color(r, g, b, a);
+
+        buffer.vertex(m, x0, y0, z0).color(r, g, b, a);
+        buffer.vertex(m, x0, y0, z1).color(r, g, b, a);
+        buffer.vertex(m, x0, y1, z1).color(r, g, b, a);
+        buffer.vertex(m, x0, y1, z0).color(r, g, b, a);
+
+        buffer.vertex(m, x1, y0, z1).color(r, g, b, a);
+        buffer.vertex(m, x1, y0, z0).color(r, g, b, a);
+        buffer.vertex(m, x1, y1, z0).color(r, g, b, a);
+        buffer.vertex(m, x1, y1, z1).color(r, g, b, a);
+
+        buffer.vertex(m, x0, y1, z1).color(r, g, b, a);
+        buffer.vertex(m, x1, y1, z1).color(r, g, b, a);
+        buffer.vertex(m, x1, y1, z0).color(r, g, b, a);
+        buffer.vertex(m, x0, y1, z0).color(r, g, b, a);
+    }
+
+    private static class JumpRing {
+        final double x, y, z;
+        final float startRadius, endRadius;
+        final int maxAge;
+        int age = 0;
+        float currentRadius;
+
+        JumpRing(double x, double y, double z, float startRadius, float endRadius, int maxAge) {
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.startRadius = startRadius;
+            this.endRadius = endRadius;
+            this.maxAge = maxAge;
+            this.currentRadius = startRadius;
+        }
+
+        void tick() {
+            age++;
+            float progress = Math.min(1.0f, (float) age / maxAge);
+            currentRadius = MathHelper.lerp(progress, startRadius, endRadius);
+        }
+
+        float getAlpha() {
+            return Math.max(0.0f, 1.0f - ((float) age / maxAge));
+        }
+
+        boolean isExpired() {
+            return age >= maxAge;
+        }
+    }
+
+    // Tüm görsel/kozmetik modüllerin tek ekranda yer aldığı dashboard ekranı
+    public static class NexusDashboardScreen extends Screen {
+
+        protected NexusDashboardScreen(Text title) {
+            super(title);
         }
 
         @Override
-        public void render(GuiGraphics graphics, int mouseX, int mouseY, float delta) {
-            int panelW = 430;
-            int panelH = 244;
-            int px = (width - panelW) / 2;
-            int py = (height - panelH) / 2;
+        public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+            if (frostedDashboard) {
+                this.renderBackground(context, mouseX, mouseY, delta);
+            }
 
-            graphics.fill(0, 0, width, height, 0x77000000);
-            panel(graphics, px, py, panelW, panelH, 0xEE0B101B, COLORS[colorIdx]);
-            graphics.fill(px, py, px + panelW, py + 24, 0xFF111827);
-            graphics.fill(px + 108, py + 24, px + 109, py + panelH, 0xFF1E293B);
+            int panelW = Math.min(this.width - 40, 440);
+            int panelH = Math.min(this.height - 40, 250);
+            int left = (this.width - panelW) / 2;
+            int top = (this.height - panelH) / 2;
 
-            graphics.drawString(font, "NEXUS x AXOLOTL", px + 12, py + 8, COLORS[colorIdx], true);
-            String hint = (listeningFeature != null)
-                ? "Bir tusa basin (ESC = Kaldir)"
-                : "Menu: P | Kapat: ESC";
-            graphics.drawString(font, hint, px + panelW - font.width(hint) - 12, py + 8, 0xFF94A3B8, false);
+            // Buzlu cam çerçeve ve neon pembe/camgöbeği üst çizgi
+            context.fill(left, top, left + panelW, top + panelH, 0xCC121622);
+            context.fill(left, top, left + panelW, top + 2, 0xFFFF77B7);
+            context.fill(left, top + panelH - 2, left + panelW, top + panelH, 0xFF7CF8FF);
 
-            super.render(graphics, mouseX, mouseY, delta);
+            context.drawTextWithShadow(
+                    this.textRenderer,
+                    Text.literal(CLIENT_TITLE + " • TEK EKRAN GÖRSEL PANEL"),
+                    left + 14,
+                    top + 12,
+                    0xFFFFFFFF
+            );
+
+            int col1X = left + 14;
+            int col2X = left + (panelW / 2) + 8;
+            int y = top + 36;
+
+            context.drawTextWithShadow(this.textRenderer, Text.literal("AXOLOTL"), col1X, y, 0xFFFF77B7);
+            context.drawTextWithShadow(this.textRenderer, Text.literal("VISUAL & COSMETIC"), col2X, y, 0xFF7CF8FF);
+            y += 18;
+
+            drawToggleRow(context, col1X, y, "Axolotl Rozeti", axolotlBadge);
+            drawToggleRow(context, col2X, y, "Crosshair Spin (4x)", crosshairSpin);
+            y += 24;
+
+            drawToggleRow(context, col1X, y, "Axolotl Maskot", axolotlMascot);
+            drawToggleRow(context, col2X, y, "Jump Circles", jumpCircles);
+            y += 24;
+
+            drawToggleRow(context, col1X, y, "Frosted Menu", frostedDashboard);
+            drawToggleRow(context, col2X, y, "Santa Hat", santaHat);
+
+            context.drawTextWithShadow(
+                    this.textRenderer,
+                    Text.literal("Tıklayarak aç/kapat • ESC ile çık"),
+                    left + 14,
+                    top + panelH - 18,
+                    0xFFA0A8C0
+            );
+
+            super.render(context, mouseX, mouseY, delta);
+        }
+
+        private void drawToggleRow(DrawContext context, int x, int y, String label, boolean enabled) {
+            context.fill(x, y, x + 190, y + 18, 0x99202638);
+            context.drawTextWithShadow(this.textRenderer, Text.literal(label), x + 6, y + 5, 0xFFE6ECF8);
+            context.drawTextWithShadow(
+                    this.textRenderer,
+                    Text.literal(enabled ? "[AÇIK]" : "[KAPALI]"),
+                    x + 142,
+                    y + 5,
+                    enabled ? 0xFF7CF8FF : 0xFFFF77B7
+            );
+        }
+
+        @Override
+        public boolean mouseClicked(double mouseX, double mouseY, int button) {
+            if (button == 0) {
+                int panelW = Math.min(this.width - 40, 440);
+                int panelH = Math.min(this.height - 40, 250);
+                int left = (this.width - panelW) / 2;
+                int top = (this.height - panelH) / 2;
+
+                int col1X = left + 14;
+                int col2X = left + (panelW / 2) + 8;
+                int row1Y = top + 54;
+                int row2Y = top + 78;
+                int row3Y = top + 102;
+
+                if (inBox(mouseX, mouseY, col1X, row1Y, 190, 18)) { axolotlBadge = !axolotlBadge; return true; }
+                if (inBox(mouseX, mouseY, col1X, row2Y, 190, 18)) { axolotlMascot = !axolotlMascot; return true; }
+                if (inBox(mouseX, mouseY, col1X, row3Y, 190, 18)) { frostedDashboard = !frostedDashboard; return true; }
+
+                if (inBox(mouseX, mouseY, col2X, row1Y, 190, 18)) { crosshairSpin = !crosshairSpin; return true; }
+                if (inBox(mouseX, mouseY, col2X, row2Y, 190, 18)) { jumpCircles = !jumpCircles; return true; }
+                if (inBox(mouseX, mouseY, col2X, row3Y, 190, 18)) { santaHat = !santaHat; return true; }
+            }
+            return super.mouseClicked(mouseX, mouseY, button);
+        }
+
+        private boolean inBox(double mx, double my, int x, int y, int w, int h) {
+            return mx >= x && mx <= x + w && my >= y && my <= y + h;
+        }
+
+        @Override
+        public boolean shouldPause() {
+            return false;
         }
     }
 }
