@@ -20,6 +20,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import org.lwjgl.glfw.GLFW;
 
 import java.io.IOException;
@@ -78,6 +79,16 @@ public class Nexus implements ClientModInitializer {
     static final Feature KEYS = add("Combat", "keys", "Keystrokes", "Hareket ve tiklama tuslari", true, -1);
     static final Feature ARMOR = add("Combat", "armor", "Zirh Durumu", "Zirh parcalari ve dayaniklilik", true, -1);
 
+    // Soup API (Soup PvP HUD ve istatistik)
+    static final Feature SOUP_COUNTER = add("Soup", "soup_counter", "Soup Sayaci", "Envanterdeki corba adedi", true, -1);
+    static final Feature SOUP_USED = add("Soup", "soup_used", "Tuketilen Soup", "Kullanilan corba sayaci", true, -1);
+    static final Feature SOUP_ALERT = add("Soup", "soup_alert", "Soup Uyarisi", "Can az ve corba varken uyari", true, -1);
+
+    // Axolotl Client (Axolotl tema, rozet ve kozmetik)
+    static final Feature AXO_BADGE = add("Axolotl", "axo_badge", "Axolotl Rozeti", "Axolotl client kimlik rozeti", true, GLFW.GLFW_KEY_B);
+    static final Feature AXO_GLOW = add("Axolotl", "axo_glow", "Axolotl Aura", "Yumusak pastel cerceve vurgusu", true, -1);
+    static final Feature AXO_WAVE = add("Axolotl", "axo_wave", "Axolotl Anim", "Canli dalga animasyon cubugu", true, -1);
+
     // Visual
     static final Feature SKY_TINT = add("Visual", "sky_tint", "Sky Atmosfer", "Gokyuzu ton filtre katmani", false, -1);
     static final Feature SHADER_FX = add("Visual", "shader_fx", "Shader Modu", "Sinematik kontrast ve derinlik tonu", false, -1);
@@ -100,7 +111,7 @@ public class Nexus implements ClientModInitializer {
 
     static boolean showWatermark = true;
 
-    static final String[] TABS = {"Combat", "Visual", "Player", "Elytra", "Ayar"};
+    static final String[] TABS = {"Combat", "Soup", "Axolotl", "Visual", "Player", "Elytra", "Ayar"};
 
     // ==================== Konum ve tema ayarlari ====================
 
@@ -109,10 +120,11 @@ public class Nexus implements ClientModInitializer {
     static int keysX = 8, keysY = 152;
     static int armorX = 8, armorY = 212;
     static int targetX = 8, targetY = 244;
+    static int soupX = 8, soupY = 294;
     static int colorIdx = 0;
 
-    static final int[] COLORS = {0xFFFFFFFF, 0xFF38BDF8, 0xFF4ADE80, 0xFFFACC15, 0xFFC084FC};
-    static final String[] COLOR_NAMES = {"Beyaz", "Camgobegi", "Yesil", "Sari", "Mor"};
+    static final int[] COLORS = {0xFFFF8FAB, 0xFF38BDF8, 0xFF4ADE80, 0xFFFACC15, 0xFFC084FC};
+    static final String[] COLOR_NAMES = {"Axolotl Pembe", "Camgobegi", "Yesil", "Sari", "Mor"};
 
     // ==================== Durum ====================
 
@@ -125,6 +137,8 @@ public class Nexus implements ClientModInitializer {
 
     private static int hits = 0;
     private static int combo = 0;
+    private static int soupsConsumed = 0;
+    private static int lastSoupCount = -1;
     private static LivingEntity lastTarget = null;
     private static long lastHitMs = 0L;
     private static long lastSwingMs = 0L;
@@ -158,6 +172,27 @@ public class Nexus implements ClientModInitializer {
         );
     }
 
+    // ==================== Soup API yardimcilari ====================
+
+    private static boolean isSoup(ItemStack stack) {
+        if (stack.isEmpty()) return false;
+        return stack.is(Items.MUSHROOM_STEW)
+            || stack.is(Items.BEETROOT_SOUP)
+            || stack.is(Items.RABBIT_STEW);
+    }
+
+    private static int countSoups(LocalPlayer p) {
+        int total = 0;
+        int size = p.getInventory().getContainerSize();
+        for (int i = 0; i < size; i++) {
+            ItemStack st = p.getInventory().getItem(i);
+            if (isSoup(st)) {
+                total += st.getCount();
+            }
+        }
+        return total;
+    }
+
     // ==================== Tick ve tus atamalari ====================
 
     private static void tick(Minecraft mc) {
@@ -187,6 +222,12 @@ public class Nexus implements ClientModInitializer {
 
         LocalPlayer p = mc.player;
         if (p == null || mc.level == null) return;
+
+        int currentSoups = countSoups(p);
+        if (lastSoupCount >= 0 && currentSoups < lastSoupCount) {
+            soupsConsumed += (lastSoupCount - currentSoups);
+        }
+        lastSoupCount = currentSoups;
 
         long now = System.currentTimeMillis();
         boolean left = mc.options.keyAttack.isDown();
@@ -288,6 +329,9 @@ public class Nexus implements ClientModInitializer {
             g.fill(0, 0, sw, sh, 0x14090D16);
             border(g, 0, 0, sw, sh, 0x26C084FC);
         }
+        if (AXO_GLOW.on) {
+            border(g, 1, 1, sw - 2, sh - 2, 0x33FF8FAB);
+        }
         if (LOWHP.on && p.getHealth() <= 6.0f && p.isAlive()) {
             int t = 6;
             int c = 0x55EF4444;
@@ -298,7 +342,7 @@ public class Nexus implements ClientModInitializer {
         }
 
         if (showWatermark) {
-            String wm = "NEXUS CLIENT";
+            String wm = AXO_BADGE.on ? "NEXUS x AXOLOTL" : "NEXUS CLIENT";
             int ww = mc.font.width(wm) + 14;
             int wh = 18;
             panel(g, wmX, wmY, ww, wh, 0xB80B101B, accent);
@@ -345,10 +389,36 @@ public class Nexus implements ClientModInitializer {
             }
         }
 
-        Entity looked = mc.crosshairPickEntity;
+        // ---- Soup API HUD ----
+        List<String> soupLines = new ArrayList<>();
+        if (SOUP_COUNTER.on) {
+            soupLines.add("Soup: " + countSoups(p));
+        }
+        if (SOUP_USED.on) {
+            soupLines.add("Icilen Soup: " + soupsConsumed);
+        }
+        if (!soupLines.isEmpty()) {
+            int maxW = 0;
+            for (String s : soupLines) maxW = Math.max(maxW, mc.font.width(s));
+            int w = maxW + 12;
+            int h = soupLines.size() * 11 + 8;
+            panel(g, soupX, soupY, w, h, 0xA80B101B, 0xFFFF8FAB);
+            for (int i = 0; i < soupLines.size(); i++) {
+                g.drawString(mc.font, soupLines.get(i), soupX + 6, soupY + 5 + i * 11, 0xFFFFC2D1, true);
+            }
+        }
+
         int cx = sw / 2;
         int cy = sh / 2;
 
+        if (SOUP_ALERT.on && p.getHealth() <= 10.0f && countSoups(p) > 0 && p.isAlive()) {
+            String alert = "SOUP HAZIR (" + countSoups(p) + ")";
+            int aw = mc.font.width(alert) + 12;
+            g.fill(cx - aw / 2, cy + 26, cx + aw / 2, cy + 40, 0xBB831843);
+            g.drawString(mc.font, alert, cx - aw / 2 + 6, cy + 29, 0xFFFDF2F8, true);
+        }
+
+        Entity looked = mc.crosshairPickEntity;
         if (CROSS.on && looked instanceof LivingEntity && mc.screen == null) {
             g.fill(cx - 6, cy - 1, cx + 7, cy + 1, 0xFFFF2020);
             g.fill(cx - 1, cy - 6, cx + 1, cy + 7, 0xFFFF2020);
@@ -437,6 +507,7 @@ public class Nexus implements ClientModInitializer {
         }
 
         List<String> playerTags = new ArrayList<>();
+        if (AXO_BADGE.on) playerTags.add("Axolotl[" + keyName(AXO_BADGE.keyCode) + "]");
         if (HAT.on) playerTags.add("Sapka[" + keyName(HAT.keyCode) + "]");
         if (HALO.on) playerTags.add("Hale");
         if (WALK_ANIM.on && p.walkAnimation.speed() > 0.05f) {
@@ -457,6 +528,11 @@ public class Nexus implements ClientModInitializer {
             int py = 8;
             panel(g, px, py, pw, 18, 0xA80B101B, 0xFF1E293B);
             g.drawString(mc.font, pLine, px + 6, py + 5, 0xFFE2E8F0, false);
+
+            if (AXO_WAVE.on) {
+                int waveW = (int) ((Math.sin(now / 180.0) * 0.5 + 0.5) * (pw - 4));
+                g.fill(px + 2, py + 16, px + 2 + Math.max(4, waveW), py + 17, accent);
+            }
         }
 
         if (p.isFallFlying()) {
@@ -517,9 +593,11 @@ public class Nexus implements ClientModInitializer {
         p.setProperty("armor.y", String.valueOf(armorY));
         p.setProperty("target.x", String.valueOf(targetX));
         p.setProperty("target.y", String.valueOf(targetY));
+        p.setProperty("soup.x", String.valueOf(soupX));
+        p.setProperty("soup.y", String.valueOf(soupY));
         p.setProperty("color", String.valueOf(colorIdx));
         try (OutputStream out = Files.newOutputStream(configPath())) {
-            p.store(out, "Nexus Client");
+            p.store(out, "Nexus Axolotl Soup Client");
         } catch (IOException e) {
             System.err.println("[Nexus] Kaydedilemedi: " + e.getMessage());
         }
@@ -551,6 +629,8 @@ public class Nexus implements ClientModInitializer {
             armorY = Integer.parseInt(p.getProperty("armor.y", String.valueOf(armorY)));
             targetX = Integer.parseInt(p.getProperty("target.x", String.valueOf(targetX)));
             targetY = Integer.parseInt(p.getProperty("target.y", String.valueOf(targetY)));
+            soupX = Integer.parseInt(p.getProperty("soup.x", String.valueOf(soupX)));
+            soupY = Integer.parseInt(p.getProperty("soup.y", String.valueOf(soupY)));
             colorIdx = Math.floorMod(Integer.parseInt(p.getProperty("color", "0")), COLORS.length);
         } catch (NumberFormatException ignored) {
         }
@@ -562,10 +642,11 @@ public class Nexus implements ClientModInitializer {
         keysX = 8; keysY = 152;
         armorX = 8; armorY = 212;
         targetX = 8; targetY = 244;
+        soupX = 8; soupY = 294;
         save();
     }
 
-    // ==================== Hile menusu gorunumlu GUI ====================
+    // ==================== Menu ====================
 
     public static class NexusMenu extends Screen {
 
@@ -576,7 +657,7 @@ public class Nexus implements ClientModInitializer {
         private EditBox searchBox;
 
         public NexusMenu() {
-            super(Component.literal("Nexus Client"));
+            super(Component.literal("Nexus Axolotl Client"));
         }
 
         @Override
@@ -588,8 +669,8 @@ public class Nexus implements ClientModInitializer {
         protected void init() {
             listeningFeature = null;
 
-            int panelW = 420;
-            int panelH = 236;
+            int panelW = 430;
+            int panelH = 244;
             int px = (width - panelW) / 2;
             int py = (height - panelH) / 2;
 
@@ -600,31 +681,31 @@ public class Nexus implements ClientModInitializer {
                 addRenderableWidget(Button.builder(Component.literal(tLabel), b -> {
                     tab = idx;
                     rebuildWidgets();
-                }).bounds(px + 10, py + 32 + i * 24, 96, 20).build());
+                }).bounds(px + 10, py + 32 + i * 26, 98, 22).build());
             }
 
             if (!TABS[tab].equals("Ayar")) {
-                searchBox = new EditBox(font, px + 116, py + 32, panelW - 126, 18,
+                searchBox = new EditBox(font, px + 118, py + 32, panelW - 128, 18,
                     Component.literal("Ara..."));
                 searchBox.setMaxLength(32);
                 searchBox.setValue(searchQuery);
                 searchBox.setResponder(val -> {
                     searchQuery = val;
-                    rebuildModuleButtons(px + 116, py + 56, panelW - 126);
+                    rebuildModuleButtons(px + 118, py + 56, panelW - 128);
                 });
                 addRenderableWidget(searchBox);
-                rebuildModuleButtons(px + 116, py + 56, panelW - 126);
+                rebuildModuleButtons(px + 118, py + 56, panelW - 128);
             } else {
                 searchBox = null;
-                buildSettings(px + 116, py + 32);
+                buildSettings(px + 118, py + 32);
             }
         }
 
         private void rebuildModuleButtons(int startX, int startY, int areaW) {
             clearWidgets();
 
-            int panelW = 420;
-            int panelH = 236;
+            int panelW = 430;
+            int panelH = 244;
             int px = (width - panelW) / 2;
             int py = (height - panelH) / 2;
 
@@ -635,10 +716,10 @@ public class Nexus implements ClientModInitializer {
                 addRenderableWidget(Button.builder(Component.literal(tLabel), b -> {
                     tab = idx;
                     rebuildWidgets();
-                }).bounds(px + 10, py + 32 + i * 24, 96, 20).build());
+                }).bounds(px + 10, py + 32 + i * 26, 98, 22).build());
             }
 
-            searchBox = new EditBox(font, px + 116, py + 32, panelW - 126, 18,
+            searchBox = new EditBox(font, px + 118, py + 32, panelW - 128, 18,
                 Component.literal("Ara..."));
             searchBox.setMaxLength(32);
             searchBox.setValue(searchQuery);
@@ -691,36 +772,33 @@ public class Nexus implements ClientModInitializer {
                     showWatermark = !showWatermark;
                     save();
                     rebuildWidgets();
-                }).bounds(x, y, 145, 20).build());
+                }).bounds(x, y, 148, 20).build());
 
             addRenderableWidget(Button.builder(
-                Component.literal("Tema Rengi: " + COLOR_NAMES[colorIdx]), b -> {
+                Component.literal("Tema: " + COLOR_NAMES[colorIdx]), b -> {
                     colorIdx = (colorIdx + 1) % COLORS.length;
                     save();
                     rebuildWidgets();
-                }).bounds(x + 150, y, 144, 20).build());
+                }).bounds(x + 152, y, 148, 20).build());
 
-            y += 26;
+            y += 24;
             mover(x, y, "Watermark", () -> wmX, v -> wmX = v, () -> wmY, v -> wmY = v);
-            y += 24;
+            y += 22;
             mover(x, y, "HUD", () -> hudX, v -> hudX = v, () -> hudY, v -> hudY = v);
-            y += 24;
+            y += 22;
             mover(x, y, "Keystrokes", () -> keysX, v -> keysX = v, () -> keysY, v -> keysY = v);
-            y += 24;
+            y += 22;
             mover(x, y, "Zirh", () -> armorX, v -> armorX = v, () -> armorY, v -> armorY = v);
-            y += 24;
+            y += 22;
             mover(x, y, "Hedef", () -> targetX, v -> targetX = v, () -> targetY, v -> targetY = v);
-            y += 28;
+            y += 22;
+            mover(x, y, "Soup", () -> soupX, v -> soupX = v, () -> soupY, v -> soupY = v);
+            y += 26;
 
             addRenderableWidget(Button.builder(Component.literal("Konumlari Sifirla"), b -> {
                 resetPositions();
                 rebuildWidgets();
-            }).bounds(x, y, 145, 20).build());
-
-            Button swatch = Button.builder(Component.literal("Aktif Renk"), b -> { })
-                .bounds(x + 150, y, 144, 20).build();
-            swatch.active = false;
-            addRenderableWidget(swatch);
+            }).bounds(x, y, 148, 20).build());
         }
 
         private void mover(int x, int y, String label,
@@ -775,17 +853,17 @@ public class Nexus implements ClientModInitializer {
 
         @Override
         public void render(GuiGraphics graphics, int mouseX, int mouseY, float delta) {
-            int panelW = 420;
-            int panelH = 236;
+            int panelW = 430;
+            int panelH = 244;
             int px = (width - panelW) / 2;
             int py = (height - panelH) / 2;
 
             graphics.fill(0, 0, width, height, 0x77000000);
             panel(graphics, px, py, panelW, panelH, 0xEE0B101B, COLORS[colorIdx]);
             graphics.fill(px, py, px + panelW, py + 24, 0xFF111827);
-            graphics.fill(px + 106, py + 24, px + 107, py + panelH, 0xFF1E293B);
+            graphics.fill(px + 108, py + 24, px + 109, py + panelH, 0xFF1E293B);
 
-            graphics.drawString(font, "NEXUS CLIENT", px + 12, py + 8, COLORS[colorIdx], true);
+            graphics.drawString(font, "NEXUS x AXOLOTL", px + 12, py + 8, COLORS[colorIdx], true);
             String hint = (listeningFeature != null)
                 ? "Bir tusa basin (ESC = Kaldir)"
                 : "Menu: P | Kapat: ESC";
