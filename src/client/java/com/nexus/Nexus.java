@@ -12,6 +12,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
@@ -47,7 +48,7 @@ public class Nexus implements ClientModInitializer {
         final String name;
         final String desc;
         boolean on;
-        int keyCode; // GLFW key code, -1 = atanmamis
+        int keyCode;
 
         Feature(String tab, String key, String name, String desc, boolean on, int keyCode) {
             this.tab = tab;
@@ -67,7 +68,7 @@ public class Nexus implements ClientModInitializer {
         return f;
     }
 
-    // Combat (PvP gorsel ve geri bildirim)
+    // Combat
     static final Feature HITMARKER = add("Combat", "hitmarker", "Hitmarker", "Vurus aninda carpraz isaret", true, -1);
     static final Feature SWING_VIS = add("Combat", "swing_vis", "Swing Gosterge", "Saldiri ritmi ve kol animasyon bar", true, -1);
     static final Feature CRIT_FX = add("Combat", "crit_fx", "Kritik Efekt", "Kritik vurus gorsel vurgusu", true, -1);
@@ -77,7 +78,7 @@ public class Nexus implements ClientModInitializer {
     static final Feature KEYS = add("Combat", "keys", "Keystrokes", "Hareket ve tiklama tuslari", true, -1);
     static final Feature ARMOR = add("Combat", "armor", "Zirh Durumu", "Zirh parcalari ve dayaniklilik", true, -1);
 
-    // Visual (Sky, Shader, Elytra animasyon, HUD)
+    // Visual
     static final Feature SKY_TINT = add("Visual", "sky_tint", "Sky Atmosfer", "Gokyuzu ton filtre katmani", false, -1);
     static final Feature SHADER_FX = add("Visual", "shader_fx", "Shader Modu", "Sinematik kontrast ve derinlik tonu", false, -1);
     static final Feature ELYTRA_ANIM = add("Visual", "elytra_anim", "Elytra Animasyon", "Kanat acilma ve akis animasyonu", true, -1);
@@ -85,19 +86,18 @@ public class Nexus implements ClientModInitializer {
     static final Feature LOWHP = add("Visual", "lowhp", "Dusuk Can Uyari", "Can azalinca kenar uyari cercevesi", true, -1);
     static final Feature HUD_BOX = add("Visual", "hud_box", "HUD Bilgileri", "FPS, Ping, XYZ, Yon, Hiz, Saat", true, -1);
 
-    // Player (Kozmetik sapka, animasyonlar, hareket)
+    // Player
     static final Feature HAT = add("Player", "hat", "Kozmetik Sapka", "Karakter basinda silindir sapka", true, GLFW.GLFW_KEY_H);
     static final Feature HALO = add("Player", "halo", "Kozmetik Hale", "Bas uzerinde donen isik halkasi", false, -1);
     static final Feature WALK_ANIM = add("Player", "walk_anim", "Adim Animasyonu", "Akici yurume ritim gostergesi", true, -1);
     static final Feature GLIDE_POSE = add("Player", "glide_pose", "Suzulme Pozu", "Havada suzulme durum efekti", true, -1);
     static final Feature SPRINT = add("Player", "sprint", "Oto Kosu", "Ileri tusunda otomatik kosu", false, -1);
 
-    // Elytra (Ucus gorsel ve telemetri)
+    // Elytra
     static final Feature ELYTRA_TRAIL = add("Elytra", "elytra_trail", "Kanat Izi", "Elytra ucusunda iz cizgileri", true, GLFW.GLFW_KEY_G);
     static final Feature ELYTRA_HUD = add("Elytra", "elytra_hud", "Ucus Telemetri", "Yukseklik, hiz ve aci bilgisi", true, -1);
     static final Feature BOOST_WARN = add("Elytra", "boost_warn", "Alicak Ucus Uyari", "Yere yaklasinca gorsel uyari", true, -1);
 
-    // Ayar tabinda kontrol edilen watermark
     static boolean showWatermark = true;
 
     static final String[] TABS = {"Combat", "Visual", "Player", "Elytra", "Ayar"};
@@ -281,7 +281,6 @@ public class Nexus implements ClientModInitializer {
         int sh = g.guiHeight();
         int accent = COLORS[colorIdx];
 
-        // ---- Visual: Sky / Shader / Dusuk can katmanlari ----
         if (SKY_TINT.on) {
             g.fill(0, 0, sw, sh / 3, 0x1838BDF8);
         }
@@ -298,7 +297,6 @@ public class Nexus implements ClientModInitializer {
             g.fill(sw - t, 0, sw, sh, c);
         }
 
-        // ---- Sol ust Watermark ----
         if (showWatermark) {
             String wm = "NEXUS CLIENT";
             int ww = mc.font.width(wm) + 14;
@@ -308,7 +306,6 @@ public class Nexus implements ClientModInitializer {
             g.drawString(mc.font, wm, wmX + 8, wmY + 5, accent, true);
         }
 
-        // ---- Ana HUD listesi ----
         List<String> lines = new ArrayList<>();
         if (HUD_BOX.on) {
             lines.add("FPS: " + mc.getFps());
@@ -348,7 +345,6 @@ public class Nexus implements ClientModInitializer {
             }
         }
 
-        // ---- Combat: Hitmarker, Kritik ve Kirmizi Crosshair ----
         Entity looked = mc.crosshairPickEntity;
         int cx = sw / 2;
         int cy = sh / 2;
@@ -375,7 +371,6 @@ public class Nexus implements ClientModInitializer {
             g.fill(bx, by, bx + Math.round(bw * prog), by + 3, accent);
         }
 
-        // ---- Combat: Hedef Paneli ----
         LivingEntity target = null;
         if (looked instanceof LivingEntity le) {
             target = le;
@@ -404,7 +399,6 @@ public class Nexus implements ClientModInitializer {
             g.fill(bx, by, bx + Math.round(bw * ratio), by + 6, 0xFF22C55E);
         }
 
-        // ---- Combat: Zirh ----
         if (ARMOR.on) {
             int aw = 96;
             int ah = 26;
@@ -429,7 +423,6 @@ public class Nexus implements ClientModInitializer {
             }
         }
 
-        // ---- Combat: Keystrokes ----
         if (KEYS.on) {
             int kw = 76;
             int kh = 52;
@@ -443,7 +436,6 @@ public class Nexus implements ClientModInitializer {
             keyBox(g, mc, keysX + 39, keysY + 36, 31, 12, "RMB", mc.options.keyUse.isDown());
         }
 
-        // ---- Player kozmetik & animasyon gostergesi ----
         List<String> playerTags = new ArrayList<>();
         if (HAT.on) playerTags.add("Sapka[" + keyName(HAT.keyCode) + "]");
         if (HALO.on) playerTags.add("Hale");
@@ -467,7 +459,6 @@ public class Nexus implements ClientModInitializer {
             g.drawString(mc.font, pLine, px + 6, py + 5, 0xFFE2E8F0, false);
         }
 
-        // ---- Elytra ucus gorsel animasyonu ve telemetri ----
         if (p.isFallFlying()) {
             if (ELYTRA_ANIM.on) {
                 double wave = Math.sin(now / 110.0) * 18.0;
@@ -602,7 +593,6 @@ public class Nexus implements ClientModInitializer {
             int px = (width - panelW) / 2;
             int py = (height - panelH) / 2;
 
-            // Sol kolon sekmeleri
             for (int i = 0; i < TABS.length; i++) {
                 final int idx = i;
                 boolean selected = (i == tab);
@@ -613,7 +603,6 @@ public class Nexus implements ClientModInitializer {
                 }).bounds(px + 10, py + 32 + i * 24, 96, 20).build());
             }
 
-            // Arama kutusu (Ayar disindaki sekmelerde)
             if (!TABS[tab].equals("Ayar")) {
                 searchBox = new EditBox(font, px + 116, py + 32, panelW - 126, 18,
                     Component.literal("Ara..."));
@@ -632,7 +621,6 @@ public class Nexus implements ClientModInitializer {
         }
 
         private void rebuildModuleButtons(int startX, int startY, int areaW) {
-            // Mevcut modul/bind butonlarini temizlemek icin ekran elemanlarini tazele
             clearWidgets();
 
             int panelW = 420;
@@ -698,8 +686,6 @@ public class Nexus implements ClientModInitializer {
         }
 
         private void buildSettings(int x, int y) {
-            int accent = COLORS[colorIdx];
-
             addRenderableWidget(Button.builder(
                 Component.literal("Watermark: " + (showWatermark ? "ACIK" : "KAPALI")), b -> {
                     showWatermark = !showWatermark;
@@ -731,7 +717,6 @@ public class Nexus implements ClientModInitializer {
                 rebuildWidgets();
             }).bounds(x, y, 145, 20).build());
 
-            // Aktif vurgu rengi gostergesi
             Button swatch = Button.builder(Component.literal("Aktif Renk"), b -> { })
                 .bounds(x + 150, y, 144, 20).build();
             swatch.active = false;
@@ -772,7 +757,8 @@ public class Nexus implements ClientModInitializer {
         }
 
         @Override
-        public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        public boolean keyPressed(KeyEvent event) {
+            int keyCode = event.key();
             if (listeningFeature != null) {
                 if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
                     listeningFeature.keyCode = -1;
@@ -784,7 +770,7 @@ public class Nexus implements ClientModInitializer {
                 rebuildWidgets();
                 return true;
             }
-            return super.keyPressed(keyCode, scanCode, modifiers);
+            return super.keyPressed(event);
         }
 
         @Override
@@ -794,7 +780,6 @@ public class Nexus implements ClientModInitializer {
             int px = (width - panelW) / 2;
             int py = (height - panelH) / 2;
 
-            // Arka plan karartma ve client penceresi
             graphics.fill(0, 0, width, height, 0x77000000);
             panel(graphics, px, py, panelW, panelH, 0xEE0B101B, COLORS[colorIdx]);
             graphics.fill(px, py, px + panelW, py + 24, 0xFF111827);
