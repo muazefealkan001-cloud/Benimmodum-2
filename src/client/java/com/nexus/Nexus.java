@@ -1,33 +1,20 @@
 package com.nexus;
 
-import com.mojang.blaze3d.platform.GlStateManager;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
-import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
-import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
-import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.render.BufferBuilder;
-import net.minecraft.client.render.BufferRenderer;
-import net.minecraft.client.render.RenderTickCounter;
-import net.minecraft.client.render.Tessellator;
-import net.minecraft.client.render.VertexFormat;
-import net.minecraft.client.render.VertexFormats;
-import net.minecraft.client.util.InputUtil;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.particle.ParticleTypes;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.util.math.RotationAxis;
-import net.minecraft.util.math.Vec3d;
-import org.joml.Matrix4f;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
+import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.entity.LivingEntity;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
@@ -36,427 +23,210 @@ import java.util.List;
 
 public class Nexus implements ClientModInitializer {
 
-    public static final String MOD_ID = "nexus";
-    public static final String CLIENT_TITLE = "NEXUS x AXOLOTL";
+    static final String TITLE = "NEXUS x AXOLOTL";
 
-    public static boolean axolotlBadge = true;
-    public static boolean axolotlMascot = true;
-    public static boolean santaHat = true;
-    public static boolean jumpCircles = true;
-    public static boolean crosshairSpin = true;
-    public static boolean frostedDashboard = true;
+    static boolean badge = true;
+    static boolean crossSpin = true;
+    static boolean jumpCircles = true;
+    static boolean hatSnow = true;
 
-    public static KeyBinding openDashboardKey;
-
-    private static final List<JumpRing> activeRings = new ArrayList<>();
+    private static KeyMapping openKey;
+    private static final List<Ring> rings = new ArrayList<>();
     private static boolean wasOnGround = true;
+    private static float spinAngle = 0f;
+    private static float focus = 0f;
+    private static int ticks = 0;
 
-    private static float spinAngle = 0.0f;
-    private static float focusProgress = 0.0f;
-
-    @Override
-    public void onInitializeClient() {
-        openDashboardKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.nexus.dashboard",
-                InputUtil.Type.KEYSYM,
-                GLFW.GLFW_KEY_RIGHT_SHIFT,
-                "category.nexus.visuals"
-        ));
-
-        ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
-        HudRenderCallback.EVENT.register(this::onHudRender);
-        WorldRenderEvents.AFTER_ENTITIES.register(this::onWorldRender);
-    }
-
-    private void onClientTick(MinecraftClient client) {
-        while (openDashboardKey.wasPressed()) {
-            if (client.player != null) {
-                client.setScreen(new NexusDashboardScreen(Text.literal(CLIENT_TITLE)));
-            }
-        }
-
-        if (client.player == null || client.world == null) {
-            return;
-        }
-
-        if (jumpCircles) {
-            boolean onGround = client.player.isOnGround();
-            Vec3d pos = client.player.getPos();
-
-            if (wasOnGround && !onGround && client.player.getVelocity().y > 0.05) {
-                activeRings.add(new JumpRing(pos.x, pos.y + 0.05, pos.z, 0.25f, 1.35f, 18));
-                spawnAxolotlParticles(client, pos.x, pos.y + 0.1, pos.z, 10);
-            } else if (!wasOnGround && onGround) {
-                activeRings.add(new JumpRing(pos.x, pos.y + 0.05, pos.z, 0.20f, 1.60f, 22));
-                spawnAxolotlParticles(client, pos.x, pos.y + 0.1, pos.z, 14);
-            }
-
-            wasOnGround = onGround;
-
-            Iterator<JumpRing> iterator = activeRings.iterator();
-            while (iterator.hasNext()) {
-                JumpRing ring = iterator.next();
-                ring.tick();
-                if (ring.isExpired()) {
-                    iterator.remove();
-                }
-            }
-        } else {
-            activeRings.clear();
-        }
-
-        if (crosshairSpin) {
-            boolean nearPlayerHitbox = isCrosshairNearPlayer(client, 6.0);
-            float target = nearPlayerHitbox ? 1.0f : 0.25f;
-            focusProgress = MathHelper.lerp(0.22f, focusProgress, target);
-            spinAngle = (spinAngle + (nearPlayerHitbox ? 6.5f : 2.0f)) % 360.0f;
-        } else {
-            focusProgress = 0.0f;
-        }
-    }
-
-    private void spawnAxolotlParticles(MinecraftClient client, double x, double y, double z, int count) {
-        if (client.world == null) return;
-        for (int i = 0; i < count; i++) {
-            double angle = (Math.PI * 2 * i) / count;
-            double vx = Math.cos(angle) * 0.04;
-            double vz = Math.sin(angle) * 0.04;
-            client.world.addParticle(ParticleTypes.END_ROD, x, y, z, vx, 0.02, vz);
-        }
-    }
-
-    private boolean isCrosshairNearPlayer(MinecraftClient client, double maxDistance) {
-        if (client.player == null || client.world == null) return false;
-
-        Vec3d eyePos = client.player.getCameraPosVec(1.0f);
-        Vec3d lookVec = client.player.getRotationVec(1.0f);
-        Vec3d reachEnd = eyePos.add(lookVec.multiply(maxDistance));
-
-        for (PlayerEntity other : client.world.getPlayers()) {
-            if (other == client.player || !other.isAlive()) continue;
-            Box expandedBox = other.getBoundingBox().expand(0.35);
-            if (expandedBox.raycast(eyePos, reachEnd).isPresent()) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private void onHudRender(DrawContext context, RenderTickCounter tickCounter) {
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client.player == null || client.options.hudHidden) return;
-
-        int width = client.getWindow().getScaledWidth();
-        int height = client.getWindow().getScaledHeight();
-
-        if (axolotlBadge) {
-            int panelX = 10;
-            int panelY = 10;
-            context.fill(panelX, panelY, panelX + 156, panelY + 24, 0x99181C28);
-            context.fill(panelX, panelY, panelX + 156, panelY + 2, 0xFFFF77B7);
-            context.drawTextWithShadow(
-                    client.textRenderer,
-                    Text.literal("✦ " + CLIENT_TITLE),
-                    panelX + 8,
-                    panelY + 8,
-                    0xFF8CF7FF
-            );
-        }
-
-        if (crosshairSpin && focusProgress > 0.02f) {
-            float centerX = width / 2.0f;
-            float centerY = height / 2.0f;
-            float radius = MathHelper.lerp(focusProgress, 18.0f, 11.0f);
-
-            MatrixStack matrices = context.getMatrices();
-            matrices.push();
-            matrices.translate(centerX, centerY, 0);
-            matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(spinAngle));
-
-            for (int i = 0; i < 4; i++) {
-                matrices.push();
-                matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(i * 90.0f));
-                int color = (i % 2 == 0) ? 0xFFFF77B7 : 0xFF7CF8FF;
-
-                context.fill(-1, (int) -radius - 6, 1, (int) -radius, color);
-                context.fill(-3, (int) -radius - 4, 0, (int) -radius - 2, color);
-                context.fill(0, (int) -radius - 4, 3, (int) -radius - 2, color);
-                matrices.pop();
-            }
-
-            matrices.pop();
-        }
-    }
-
-    private void onWorldRender(WorldRenderContext context) {
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client.world == null || client.player == null) return;
-
-        MatrixStack matrices = context.matrixStack();
-        if (matrices == null) return;
-
-        Vec3d cameraPos = context.camera().getPos();
-
-        if (jumpCircles && !activeRings.isEmpty()) {
-            renderJumpCircles(matrices, cameraPos);
-        }
-
-        if (santaHat) {
-            for (PlayerEntity player : client.world.getPlayers()) {
-                if (player == client.player && client.options.getPerspective().isFirstPerson()) {
-                    continue;
-                }
-                renderSantaHatAbovePlayer(matrices, cameraPos, player);
-            }
-        }
-    }
-
-    private void renderJumpCircles(MatrixStack matrices, Vec3d cameraPos) {
-        GlStateManager._enableBlend();
-        GlStateManager._blendFunc(GlStateManager.SrcFactor.SRC_ALPHA.value, GlStateManager.DstFactor.ONE_MINUS_SRC_ALPHA.value);
-        GlStateManager._disableCull();
-
-        Tessellator tessellator = Tessellator.getInstance();
-        BufferBuilder buffer = tessellator.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
-
-        matrices.push();
-        matrices.translate(-cameraPos.x, -cameraPos.y, -cameraPos.z);
-        Matrix4f matrix = matrices.peek().getPositionMatrix();
-
-        int segments = 36;
-        for (JumpRing ring : activeRings) {
-            float alpha = ring.getAlpha();
-            int a = (int) (alpha * 255.0f) & 0xFF;
-
-            for (int i = 0; i < segments; i++) {
-                double a1 = (Math.PI * 2.0 * i) / segments;
-                double a2 = (Math.PI * 2.0 * (i + 1)) / segments;
-
-                float x1 = (float) (ring.x + Math.cos(a1) * ring.currentRadius);
-                float z1 = (float) (ring.z + Math.sin(a1) * ring.currentRadius);
-                float x2 = (float) (ring.x + Math.cos(a2) * ring.currentRadius);
-                float z2 = (float) (ring.z + Math.sin(a2) * ring.currentRadius);
-
-                int r = (i % 2 == 0) ? 255 : 124;
-                int g = (i % 2 == 0) ? 119 : 248;
-                int b = (i % 2 == 0) ? 183 : 255;
-
-                buffer.vertex(matrix, x1, (float) ring.y, z1).color(r, g, b, a);
-                buffer.vertex(matrix, x2, (float) ring.y, z2).color(r, g, b, a);
-            }
-        }
-
-        BufferRenderer.drawWithGlobalProgram(buffer.end());
-        matrices.pop();
-
-        GlStateManager._enableCull();
-        GlStateManager._disableBlend();
-    }
-
-    private void renderSantaHatAbovePlayer(MatrixStack matrices, Vec3d cameraPos, PlayerEntity player) {
-        double px = MathHelper.lerp(0.5, player.prevX, player.getX());
-        double py = MathHelper.lerp(0.5, player.prevY, player.getY());
-        double pz = MathHelper.lerp(0.5, player.prevZ, player.getZ());
-
-        float headY = (float) (py + player.getEyeHeight(player.getPose()) + 0.14 - cameraPos.y);
-        float relX = (float) (px - cameraPos.x);
-        float relZ = (float) (pz - cameraPos.z);
-
-        GlStateManager._enableBlend();
-        GlStateManager._blendFunc(GlStateManager.SrcFactor.SRC_ALPHA.value, GlStateManager.DstFactor.ONE_MINUS_SRC_ALPHA.value);
-
-        Tessellator tessellator = Tessellator.getInstance();
-        BufferBuilder buffer = tessellator.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
-
-        matrices.push();
-        matrices.translate(relX, headY, relZ);
-        matrices.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(-player.getYaw()));
-        Matrix4f matrix = matrices.peek().getPositionMatrix();
-
-        addBox(buffer, matrix, -0.26f, 0.00f, -0.26f, 0.26f, 0.08f, 0.26f, 248, 250, 255, 235);
-        addBox(buffer, matrix, -0.22f, 0.08f, -0.22f, 0.22f, 0.24f, 0.22f, 235, 45, 75, 235);
-        addBox(buffer, matrix, -0.14f, 0.24f, -0.28f, 0.14f, 0.34f, -0.06f, 235, 45, 75, 235);
-        addBox(buffer, matrix, -0.07f, 0.32f, -0.34f, 0.07f, 0.44f, -0.20f, 255, 255, 255, 245);
-
-        BufferRenderer.drawWithGlobalProgram(buffer.end());
-        matrices.pop();
-
-        GlStateManager._disableBlend();
-    }
-
-    private static void addBox(
-            BufferBuilder buffer,
-            Matrix4f m,
-            float x0, float y0, float z0,
-            float x1, float y1, float z1,
-            int r, int g, int b, int a
-    ) {
-        buffer.vertex(m, x0, y0, z1).color(r, g, b, a);
-        buffer.vertex(m, x1, y0, z1).color(r, g, b, a);
-        buffer.vertex(m, x1, y1, z1).color(r, g, b, a);
-        buffer.vertex(m, x0, y1, z1).color(r, g, b, a);
-
-        buffer.vertex(m, x1, y0, z0).color(r, g, b, a);
-        buffer.vertex(m, x0, y0, z0).color(r, g, b, a);
-        buffer.vertex(m, x0, y1, z0).color(r, g, b, a);
-        buffer.vertex(m, x1, y1, z0).color(r, g, b, a);
-
-        buffer.vertex(m, x0, y0, z0).color(r, g, b, a);
-        buffer.vertex(m, x0, y0, z1).color(r, g, b, a);
-        buffer.vertex(m, x0, y1, z1).color(r, g, b, a);
-        buffer.vertex(m, x0, y1, z0).color(r, g, b, a);
-
-        buffer.vertex(m, x1, y0, z1).color(r, g, b, a);
-        buffer.vertex(m, x1, y0, z0).color(r, g, b, a);
-        buffer.vertex(m, x1, y1, z0).color(r, g, b, a);
-        buffer.vertex(m, x1, y1, z1).color(r, g, b, a);
-
-        buffer.vertex(m, x0, y1, z1).color(r, g, b, a);
-        buffer.vertex(m, x1, y1, z1).color(r, g, b, a);
-        buffer.vertex(m, x1, y1, z0).color(r, g, b, a);
-        buffer.vertex(m, x0, y1, z0).color(r, g, b, a);
-    }
-
-    private static class JumpRing {
+    private static final class Ring {
         final double x, y, z;
-        final float startRadius, endRadius;
+        final float start, end;
         final int maxAge;
         int age = 0;
-        float currentRadius;
+        float radius;
 
-        JumpRing(double x, double y, double z, float startRadius, float endRadius, int maxAge) {
+        Ring(double x, double y, double z, float start, float end, int maxAge) {
             this.x = x;
             this.y = y;
             this.z = z;
-            this.startRadius = startRadius;
-            this.endRadius = endRadius;
+            this.start = start;
+            this.end = end;
             this.maxAge = maxAge;
-            this.currentRadius = startRadius;
+            this.radius = start;
         }
 
         void tick() {
             age++;
-            float progress = Math.min(1.0f, (float) age / maxAge);
-            currentRadius = MathHelper.lerp(progress, startRadius, endRadius);
+            float t = Math.min(1f, (float) age / maxAge);
+            radius = start + (end - start) * t;
         }
 
-        float getAlpha() {
-            return Math.max(0.0f, 1.0f - ((float) age / maxAge));
-        }
-
-        boolean isExpired() {
+        boolean expired() {
             return age >= maxAge;
         }
     }
 
-    public static class NexusDashboardScreen extends Screen {
+    @Override
+    public void onInitializeClient() {
+        KeyMapping.Category category = KeyMapping.Category.register(
+            Identifier.fromNamespaceAndPath("nexus", "main"));
+        openKey = KeyBindingHelper.registerKeyBinding(
+            new KeyMapping("key.nexus.menu", GLFW.GLFW_KEY_P, category));
 
-        protected NexusDashboardScreen(Text title) {
-            super(title);
-        }
+        ClientTickEvents.END_CLIENT_TICK.register(Nexus::tick);
 
-        private TextRenderer getRenderer() {
-            return MinecraftClient.getInstance().textRenderer;
-        }
-
-        @Override
-        public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-            if (frostedDashboard) {
-                super.renderBackground(context, mouseX, mouseY, delta);
+        HudElementRegistry.attachElementAfter(
+            VanillaHudElements.MISC_OVERLAYS,
+            Identifier.fromNamespaceAndPath("nexus", "hud"),
+            (graphics, tickCounter) -> {
+                Minecraft mc = Minecraft.getInstance();
+                if (mc.player == null || mc.level == null || mc.options.hideGui) return;
+                renderHud(graphics, mc);
             }
+        );
+    }
 
-            TextRenderer tr = getRenderer();
-            int panelW = Math.min(this.width - 40, 440);
-            int panelH = Math.min(this.height - 40, 250);
-            int left = (this.width - panelW) / 2;
-            int top = (this.height - panelH) / 2;
+    // ==================== Tick ====================
 
-            context.fill(left, top, left + panelW, top + panelH, 0xCC121622);
-            context.fill(left, top, left + panelW, top + 2, 0xFFFF77B7);
-            context.fill(left, top + panelH - 2, left + panelW, top + panelH, 0xFF7CF8FF);
+    private static void tick(Minecraft mc) {
+        ticks++;
 
-            context.drawTextWithShadow(
-                    tr,
-                    Text.literal(CLIENT_TITLE + " • TEK EKRAN GÖRSEL PANEL"),
-                    left + 14,
-                    top + 12,
-                    0xFFFFFFFF
-            );
-
-            int col1X = left + 14;
-            int col2X = left + (panelW / 2) + 8;
-            int y = top + 36;
-
-            context.drawTextWithShadow(tr, Text.literal("AXOLOTL"), col1X, y, 0xFFFF77B7);
-            context.drawTextWithShadow(tr, Text.literal("VISUAL & COSMETIC"), col2X, y, 0xFF7CF8FF);
-            y += 18;
-
-            drawToggleRow(context, tr, col1X, y, "Axolotl Rozeti", axolotlBadge);
-            drawToggleRow(context, tr, col2X, y, "Crosshair Spin (4x)", crosshairSpin);
-            y += 24;
-
-            drawToggleRow(context, tr, col1X, y, "Axolotl Maskot", axolotlMascot);
-            drawToggleRow(context, tr, col2X, y, "Jump Circles", jumpCircles);
-            y += 24;
-
-            drawToggleRow(context, tr, col1X, y, "Frosted Menu", frostedDashboard);
-            drawToggleRow(context, tr, col2X, y, "Santa Hat", santaHat);
-
-            context.drawTextWithShadow(
-                    tr,
-                    Text.literal("Tıklayarak aç/kapat • ESC ile çık"),
-                    left + 14,
-                    top + panelH - 18,
-                    0xFFA0A8C0
-            );
-
-            super.render(context, mouseX, mouseY, delta);
+        while (openKey.consumeClick()) {
+            mc.setScreen(mc.screen instanceof NexusMenu ? null : new NexusMenu());
         }
 
-        private void drawToggleRow(DrawContext context, TextRenderer tr, int x, int y, String label, boolean enabled) {
-            context.fill(x, y, x + 190, y + 18, 0x99202638);
-            context.drawTextWithShadow(tr, Text.literal(label), x + 6, y + 5, 0xFFE6ECF8);
-            context.drawTextWithShadow(
-                    tr,
-                    Text.literal(enabled ? "[AÇIK]" : "[KAPALI]"),
-                    x + 142,
-                    y + 5,
-                    enabled ? 0xFF7CF8FF : 0xFFFF77B7
-            );
+        LocalPlayer p = mc.player;
+        if (p == null || mc.level == null) {
+            rings.clear();
+            return;
         }
 
-        @Override
-        public boolean mouseClicked(double mouseX, double mouseY, int button) {
-            if (button == 0) {
-                int panelW = Math.min(this.width - 40, 440);
-                int panelH = Math.min(this.height - 40, 250);
-                int left = (this.width - panelW) / 2;
-                int top = (this.height - panelH) / 2;
-
-                int col1X = left + 14;
-                int col2X = left + (panelW / 2) + 8;
-                int row1Y = top + 54;
-                int row2Y = top + 78;
-                int row3Y = top + 102;
-
-                if (inBox(mouseX, mouseY, col1X, row1Y, 190, 18)) { axolotlBadge = !axolotlBadge; return true; }
-                if (inBox(mouseX, mouseY, col1X, row2Y, 190, 18)) { axolotlMascot = !axolotlMascot; return true; }
-                if (inBox(mouseX, mouseY, col1X, row3Y, 190, 18)) { frostedDashboard = !frostedDashboard; return true; }
-
-                if (inBox(mouseX, mouseY, col2X, row1Y, 190, 18)) { crosshairSpin = !crosshairSpin; return true; }
-                if (inBox(mouseX, mouseY, col2X, row2Y, 190, 18)) { jumpCircles = !jumpCircles; return true; }
-                if (inBox(mouseX, mouseY, col2X, row3Y, 190, 18)) { santaHat = !santaHat; return true; }
+        // Jump circles (parcacik halkalari)
+        if (jumpCircles) {
+            boolean onGround = p.onGround();
+            if (wasOnGround && !onGround && p.getDeltaMovement().y > 0.05) {
+                rings.add(new Ring(p.getX(), p.getY() + 0.05, p.getZ(), 0.25f, 1.35f, 18));
+            } else if (!wasOnGround && onGround) {
+                rings.add(new Ring(p.getX(), p.getY() + 0.05, p.getZ(), 0.20f, 1.60f, 22));
             }
-            return super.mouseClicked(mouseX, mouseY, button);
+            wasOnGround = onGround;
+
+            Iterator<Ring> it = rings.iterator();
+            while (it.hasNext()) {
+                Ring r = it.next();
+                r.tick();
+                if (r.expired()) {
+                    it.remove();
+                    continue;
+                }
+                int points = 14;
+                for (int i = 0; i < points; i++) {
+                    double a = (Math.PI * 2.0 * i) / points;
+                    mc.level.addParticle(ParticleTypes.GLOW,
+                        r.x + Math.cos(a) * r.radius, r.y, r.z + Math.sin(a) * r.radius,
+                        0.0, 0.0, 0.0);
+                }
+            }
+        } else {
+            rings.clear();
         }
 
-        private boolean inBox(double mx, double my, int x, int y, int w, int h) {
-            return mx >= x && mx <= x + w && my >= y && my <= y + h;
+        // Sapka yerine bas ustunde donen kar halkasi
+        if (hatSnow && ticks % 3 == 0) {
+            for (int i = 0; i < 5; i++) {
+                double a = ticks * 0.12 + i * (Math.PI * 2.0 / 5.0);
+                mc.level.addParticle(ParticleTypes.SNOWFLAKE,
+                    p.getX() + Math.cos(a) * 0.35, p.getY() + 2.1, p.getZ() + Math.sin(a) * 0.35,
+                    0.0, 0.0, 0.0);
+            }
+        }
+
+        // Crosshair spin animasyonu
+        if (crossSpin) {
+            boolean aiming = mc.crosshairPickEntity instanceof LivingEntity;
+            float target = aiming ? 1.0f : 0.25f;
+            focus += (target - focus) * 0.22f;
+            spinAngle = (spinAngle + (aiming ? 6.5f : 2.0f)) % 360f;
+        } else {
+            focus = 0f;
+        }
+    }
+
+    // ==================== HUD ====================
+
+    private static void renderHud(GuiGraphics g, Minecraft mc) {
+        int w = g.guiWidth();
+        int h = g.guiHeight();
+
+        if (badge) {
+            int x = 10;
+            int y = 10;
+            g.fill(x, y, x + 120, y + 22, 0x99181C28);
+            g.fill(x, y, x + 120, y + 2, 0xFFFF77B7);
+            g.drawString(mc.font, TITLE, x + 8, y + 8, 0xFF8CF7FF, true);
+        }
+
+        if (crossSpin && focus > 0.02f) {
+            int cx = w / 2;
+            int cy = h / 2;
+            float radius = 18f + (11f - 18f) * focus;
+
+            for (int i = 0; i < 4; i++) {
+                double a = Math.toRadians(spinAngle + i * 90.0);
+                int color = (i % 2 == 0) ? 0xFFFF77B7 : 0xFF7CF8FF;
+                for (int k = 0; k < 4; k++) {
+                    int px = cx + (int) Math.round(Math.cos(a) * (radius + k * 3));
+                    int py = cy + (int) Math.round(Math.sin(a) * (radius + k * 3));
+                    g.fill(px - 1, py - 1, px + 1, py + 1, color);
+                }
+            }
+        }
+    }
+
+    // ==================== Menu ====================
+
+    public static class NexusMenu extends Screen {
+
+        public NexusMenu() {
+            super(Component.literal(TITLE));
         }
 
         @Override
-        public boolean shouldPause() {
+        public boolean isPauseScreen() {
             return false;
+        }
+
+        @Override
+        protected void init() {
+            int x = width / 2 - 100;
+            int y = height / 2 - 50;
+            toggle(x, y, "Rozet", () -> badge, v -> badge = v);
+            toggle(x, y + 24, "Crosshair spin", () -> crossSpin, v -> crossSpin = v);
+            toggle(x, y + 48, "Jump circles", () -> jumpCircles, v -> jumpCircles = v);
+            toggle(x, y + 72, "Kar halkasi (sapka)", () -> hatSnow, v -> hatSnow = v);
+        }
+
+        private void toggle(int x, int y, String label,
+                            java.util.function.BooleanSupplier get,
+                            java.util.function.Consumer<Boolean> set) {
+            addRenderableWidget(Button.builder(
+                Component.literal(label + ": " + (get.getAsBoolean() ? "ACIK" : "KAPALI")), b -> {
+                    set.accept(!get.getAsBoolean());
+                    rebuildWidgets();
+                }).bounds(x, y, 200, 20).build());
+        }
+
+        @Override
+        public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
+            int px = width / 2 - 112;
+            int py = height / 2 - 82;
+            g.fill(px, py, px + 224, py + 172, 0xCC121622);
+            g.fill(px, py, px + 224, py + 2, 0xFFFF77B7);
+            g.fill(px, py + 170, px + 224, py + 172, 0xFF7CF8FF);
+
+            super.render(g, mouseX, mouseY, delta);
+
+            g.drawString(font, TITLE, px + 10, py + 10, 0xFFFFFFFF, true);
+            g.drawString(font, "P / ESC: kapat", px + 10, py + 158, 0xFFA0A8C0, false);
         }
     }
 }
